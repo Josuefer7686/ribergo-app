@@ -1,0 +1,52 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // User profile documents
+    match /users/{userId} {
+      allow read, write: if true;
+    }
+
+    // Rides / Solicitudes en tiempo real
+    match /rides/{rideId} {
+      allow read, write: if true;
+    }
+
+    // Chat messages inside rides (subcollections 'messages' & 'chat')
+    match /rides/{rideId}/messages/{messageId} {
+      allow read, write: if true;
+    }
+    match /rides/{rideId}/chat/{messageId} {
+      allow read, write: if true;
+    }
+
+    // Online drivers (live GPS position & availability on map)
+    match /online_drivers/{driverId} {
+      allow read, write: if true;
+    }
+
+    // Trip history items
+    match /tripsHistory/{tripId} {
+      allow read, create: if true;
+    }
+
+    // Terminal Interprovincial collections
+    match /terminal_departures/{departureId} {
+      allow read, write: if true;
+    }
+    match /terminal_bookings/{bookingId} {
+      allow read, write: if true;
+    }
+    match /terminal_expresos/{expresoId} {
+      allow read, write: if true;
+    }
+    match /terminal_encomiendas/{encomiendaId} {
+      allow read, write: if true;
+    }
+
+    // Global catch-all rule for all other collections
+    match /{document=**} {
+      allow read, write: if true;
+    }
+  }
+}

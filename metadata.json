@@ -1,0 +1,1 @@
+{"name":"RiberGO","description":"Plataforma de solicitud de mototaxis en Riberalta.","requestFramePermissions":["geolocation"],"majorCapabilities":["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]}
