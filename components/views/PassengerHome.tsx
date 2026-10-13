@@ -8,11 +8,13 @@ import { audio } from '@/utils/audio';
 import { MapView } from '@/components/map/MapView';
 import { RIBERALTA_DESTINATIONS, DestinationOption, MOCK_DRIVERS } from '@/services/mockData';
 import { 
-  Bike, Navigation, Search, MapPin, Star, MessageSquare, X, Check, Clock, DollarSign, Shield, ChevronRight, AlertCircle 
+  Bike, Navigation, Search, MapPin, Star, MessageSquare, X, Check, Clock, DollarSign, Shield, ChevronRight, AlertCircle,
+  QrCode, Sparkles, TrendingUp, Flame
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
 import { TerminalView } from '@/components/terminal/TerminalView';
+import { NegotiationChatModal } from '@/components/modals/NegotiationChatModal';
 import { Wrench, Bus, AlertTriangle } from 'lucide-react';
 import { useAutoLocation } from '@/hooks/useAutoLocation';
 
@@ -35,20 +37,49 @@ export const PassengerHome = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [rating, setRating] = useState(5);
   const [reviewText, setReviewText] = useState('');
+  const [customOffer, setCustomOffer] = useState<number | null>(null);
+  const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<'CASH' | 'QR'>('CASH');
+  const [qrPaymentSent, setQrPaymentSent] = useState(false);
+
+  // Default fare calculation based on service type
+  const baseFare = urbanServiceType === 'REMOLCADA' ? 15 : 10;
+  const currentOfferFare = customOffer !== null ? customOffer : baseFare;
 
   // Request GPS location on initial load or button tap
   const handleFetchLocation = () => {
     requestLocation();
   };
 
-  // Trigger Mototaxi Request Flow
-  const handleStartBooking = () => {
+  // Trigger Mototaxi / Remolcada Booking Flow DIRECTLY
+  const handleStartBooking = async () => {
     haptics.heavy();
     audio.passengerRideRequested();
     if (!currentLocation) {
       handleFetchLocation();
     }
-    setPassengerState('SELECTING_DESTINATION');
+    
+    // Iniciar búsqueda directamente (Radar)
+    setPassengerState('SEARCHING_DRIVER');
+
+    const pickupLoc = currentLocation || { lat: -11.0061, lng: -66.0747, name: 'Mi Ubicación' };
+    const destLoc = { lat: -11.0061, lng: -66.0747, name: 'Negociar en chat' };
+    const passengerId = user?.id || 'usr-anon';
+    const passengerName = user?.name || 'Pasajero RiberGO';
+    const initialPrice = urbanServiceType === 'REMOLCADA' ? 15 : 10;
+
+    try {
+      const trip = await apiService.requestRide(
+        pickupLoc,
+        destLoc,
+        initialPrice,
+        passengerId,
+        passengerName,
+        'CASH'
+      );
+      setActiveTrip(trip);
+    } catch (err) {
+      console.error('Request ride error:', err);
+    }
   };
 
   // Select Destination
@@ -69,7 +100,7 @@ export const PassengerHome = () => {
     const unsubscribe = apiService.subscribeToRide(activeTrip.id, (rideData) => {
       if (!rideData) return;
 
-      if (rideData.driverId && rideData.status === 'GOING_TO_PASSENGER') {
+      if (rideData.status === 'NEGOTIATING') {
         const driverInfo = {
           id: rideData.driverId,
           name: rideData.driverName || 'Mototaxista RiberGO',
@@ -83,26 +114,57 @@ export const PassengerHome = () => {
         };
         setAssignedDriver(driverInfo);
         setActiveTrip({
-          id: rideData.id,
-          pickup: rideData.pickup,
-          destination: rideData.destination,
-          price: rideData.price,
-          distanceKm: rideData.distanceKm || 2.4,
-          durationMin: rideData.durationMin || 6,
+          ...(activeTrip || {}),
+          ...rideData,
+          driver: driverInfo,
+        });
+        haptics.heavy();
+        audio.passengerDriverFound();
+        setPassengerState('NEGOTIATING');
+      } else if (rideData.driverId && rideData.status === 'GOING_TO_PASSENGER') {
+        const driverInfo = {
+          id: rideData.driverId,
+          name: rideData.driverName || 'Mototaxista RiberGO',
+          phone: rideData.driverPhone || '+591 70000000',
+          rating: rideData.driverRating || 5.0,
+          trips: 15,
+          avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=150&q=80',
+          motorcycle: rideData.motorcycle || 'Honda Wave 110',
+          plate: rideData.plate || 'RBT-100',
+          currentLocation: rideData.pickup || currentLocation || { lat: -11.0061, lng: -66.0747 },
+        };
+        setAssignedDriver(driverInfo);
+        setActiveTrip({
+          ...(activeTrip || {}),
+          ...rideData,
           driver: driverInfo,
         });
         haptics.success();
         audio.passengerDriverFound();
         setPassengerState('DRIVER_FOUND');
+      } else if (rideData.status === 'SEARCHING_DRIVER') {
+        setPassengerState('SEARCHING_DRIVER');
       } else if (rideData.status === 'TRIP_STARTED') {
+        if (rideData.paymentStatus) {
+          setActiveTrip({
+            ...(activeTrip || {}),
+            ...rideData,
+          });
+        }
         setPassengerState('TRIP_STARTED');
       } else if (rideData.status === 'COMPLETED') {
+        if (rideData.paymentStatus) {
+          setActiveTrip({
+            ...(activeTrip || {}),
+            ...rideData,
+          });
+        }
         setPassengerState('TRIP_COMPLETED');
       }
     });
 
     return () => unsubscribe();
-  }, [activeTrip?.id, setActiveTrip, setAssignedDriver, setPassengerState, currentLocation]);
+  }, [activeTrip?.id, setActiveTrip, setAssignedDriver, setPassengerState, currentLocation, selectedPaymentMethod]);
 
   // Confirm Mototaxi
   const handleConfirmBooking = async () => {
@@ -113,13 +175,34 @@ export const PassengerHome = () => {
     const destLoc = destination || { lat: -11.0061, lng: -66.0747, name: 'Acordar destino en persona' };
     const passengerId = user?.id || 'usr-anon';
     const passengerName = user?.name || 'Pasajero RiberGO';
-    const fare = urbanServiceType === 'REMOLCADA' ? 15 : 10;
+    const finalFare = currentOfferFare;
 
     try {
-      const trip = await apiService.requestRide(pickupLoc, destLoc, fare, passengerId, passengerName);
+      const trip = await apiService.requestRide(
+        pickupLoc, 
+        destLoc, 
+        finalFare, 
+        passengerId, 
+        passengerName,
+        selectedPaymentMethod
+      );
       setActiveTrip(trip);
     } catch (err) {
       console.error('Request ride error:', err);
+    }
+  };
+
+  // Passenger notifies driver that QR was transferred
+  const handleNotifyQrPaid = async () => {
+    haptics.success();
+    audio.passengerRideRequested();
+    setQrPaymentSent(true);
+    if (activeTrip?.id) {
+      await apiService.submitRideQrPayment(activeTrip.id);
+      setActiveTrip({
+        ...activeTrip,
+        paymentStatus: 'WAITING_DRIVER_CONFIRM',
+      });
     }
   };
 
@@ -378,155 +461,7 @@ export const PassengerHome = () => {
             </motion.div>
           )}
 
-          {/* STATE 2: SELECTING DESTINATION */}
-          {passengerState === 'SELECTING_DESTINATION' && (
-            <motion.div
-              key="selecting"
-              initial={{ y: 100, opacity: 0 }}
-              animate={{ y: 0, opacity: 1 }}
-              exit={{ y: 100, opacity: 0 }}
-              className="p-5 rounded-3xl bg-surface/95 border border-border-custom backdrop-blur-xl shadow-2xl space-y-4 max-h-[75vh] flex flex-col"
-            >
-              <div className="flex items-center justify-between">
-                <h3 className="text-sm font-bold text-white">¿A dónde quieres ir?</h3>
-                <button 
-                  onClick={() => setPassengerState('IDLE')}
-                  className="p-1.5 rounded-full bg-surface-2 text-text-secondary hover:text-white"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
 
-              {/* Search Bar */}
-              <div className="relative">
-                <Search className="w-4 h-4 absolute left-3.5 top-3.5 text-text-secondary" />
-                <input
-                  type="text"
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="Buscar lugar en Riberalta..."
-                  className="w-full bg-surface-2 border border-border-custom rounded-xl py-2.5 pl-10 pr-4 text-sm text-white placeholder-text-secondary focus:outline-none focus:border-gold-primary transition"
-                />
-              </div>
-
-              {/* Destinations List */}
-              <div className="overflow-y-auto no-scrollbar space-y-2 pr-1 flex-1">
-                {filteredDestinations.map((dest) => {
-                  const isInPerson = dest.id === 'in-person';
-                  return (
-                    <button
-                      key={dest.id}
-                      onClick={() => handleSelectDestination(dest)}
-                      className={`w-full p-3.5 rounded-2xl text-left flex items-center justify-between group transition shadow-md ${
-                        isInPerson
-                          ? 'bg-gold-primary/10 border-2 border-gold-primary hover:bg-gold-primary/20'
-                          : 'bg-surface-2/60 hover:bg-surface-2 border border-border-custom/50 hover:border-gold-primary/40'
-                      }`}
-                    >
-                      <div className="flex items-center gap-3">
-                        <div className={`w-9 h-9 rounded-xl flex items-center justify-center transition ${
-                          isInPerson 
-                            ? 'bg-gold-primary text-background font-bold' 
-                            : 'bg-gold-primary/10 border border-gold-primary/20 text-gold-primary group-hover:bg-gold-primary group-hover:text-background'
-                        }`}>
-                          {isInPerson ? <Bike className="w-5 h-5" /> : <MapPin className="w-4 h-4" />}
-                        </div>
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <p className={`text-xs font-bold ${isInPerson ? 'text-gold-primary' : 'text-white group-hover:text-gold-primary'} transition`}>
-                              {dest.name}
-                            </p>
-                            {isInPerson && (
-                              <span className="px-1.5 py-0.5 rounded-md bg-gold-primary text-background text-[9px] font-black uppercase">
-                                Recomendado
-                              </span>
-                            )}
-                          </div>
-                          <p className="text-[11px] text-text-secondary mt-0.5">{dest.address}</p>
-                        </div>
-                      </div>
-                      <ChevronRight className={`w-4 h-4 transition ${isInPerson ? 'text-gold-primary' : 'text-text-secondary group-hover:text-gold-primary'}`} />
-                    </button>
-                  );
-                })}
-              </div>
-            </motion.div>
-          )}
-
-          {/* STATE 3: CONFIRMING */}
-          {passengerState === 'CONFIRMING' && destination && (
-            <motion.div
-              key="confirming"
-              initial={{ y: 100, opacity: 0 }}
-              animate={{ y: 0, opacity: 1 }}
-              exit={{ y: 100, opacity: 0 }}
-              className="p-5 rounded-3xl bg-surface/95 border border-border-custom backdrop-blur-xl shadow-2xl space-y-4"
-            >
-              <div className="flex items-center justify-between">
-                <h3 className="text-sm font-bold text-white">Confirmar mototaxi</h3>
-                <button 
-                  onClick={() => setPassengerState('SELECTING_DESTINATION')}
-                  className="p-1.5 rounded-full bg-surface-2 text-text-secondary hover:text-white"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
-
-              {/* Trip Summary Card */}
-              {(() => {
-                const isInPerson = (destination as any).id === 'in-person' || destination.name?.toLowerCase().includes('acordar');
-                const fare = urbanServiceType === 'REMOLCADA' ? 15 : 10;
-                return (
-                  <div className="p-3.5 rounded-2xl bg-surface-2 border border-border-custom space-y-3">
-                    <div className="flex items-start gap-3">
-                      <div className="flex flex-col items-center gap-1 mt-1">
-                        <div className="w-2.5 h-2.5 rounded-full bg-gold-primary" />
-                        {!isInPerson && <div className="w-0.5 h-6 bg-border-custom" />}
-                        {!isInPerson && <div className="w-2.5 h-2.5 rounded-full border-2 border-gold-primary bg-background" />}
-                      </div>
-                      <div className="flex-1 space-y-2 text-xs">
-                        <div>
-                          <p className="text-[10px] text-text-secondary uppercase font-semibold">Origen</p>
-                          <p className="font-semibold text-white">{currentLocation?.name || 'Tu ubicación actual'}</p>
-                        </div>
-                        <div>
-                          <p className="text-[10px] text-text-secondary uppercase font-semibold">Destino</p>
-                          <p className="font-semibold text-gold-primary">{destination.name}</p>
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="pt-2 border-t border-border-custom flex items-center justify-between text-xs">
-                      {isInPerson ? (
-                        <div className="flex items-center gap-1.5 text-gold-light text-[11px] font-semibold">
-                          <span>Acordar destino en persona con el chofer</span>
-                        </div>
-                      ) : (
-                        <div className="flex items-center gap-1.5 text-text-secondary">
-                          <Clock className="w-3.5 h-3.5 text-gold-primary" />
-                          <span>~6 min</span>
-                          <span className="mx-1">•</span>
-                          <span>{preferences.settings.units === 'mi' ? '1.5 mi' : '2.4 km'}</span>
-                        </div>
-                      )}
-                      <div className="text-right">
-                        <span className="text-lg font-black text-gold-primary">{fare} BOB</span>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })()}
-
-              <button
-                onClick={handleConfirmBooking}
-                className="w-full py-4 bg-gold-primary hover:bg-gold-light text-background rounded-2xl font-black text-base flex items-center justify-center gap-2 shadow-xl shadow-gold-primary/25 transition active:scale-[0.98]"
-              >
-                <span>
-                  {urbanServiceType === 'REMOLCADA' ? 'Solicitar remolcada (15 BOB)' : 'Solicitar mototaxi (10 BOB)'}
-                </span>
-              </button>
-            </motion.div>
-          )}
 
           {/* STATE 4: SEARCHING DRIVER (Radar Animation) */}
           {passengerState === 'SEARCHING_DRIVER' && (
@@ -552,8 +487,15 @@ export const PassengerHome = () => {
               </div>
 
               <button
-                onClick={() => setPassengerState('IDLE')}
-                className="px-4 py-2 rounded-xl bg-surface-2 text-xs font-semibold text-text-secondary hover:text-white transition"
+                onClick={async () => {
+                  haptics.selection();
+                  if (activeTrip?.id) {
+                    await apiService.cancelRideNegotiation(activeTrip.id);
+                  }
+                  setActiveTrip(null);
+                  setPassengerState('IDLE');
+                }}
+                className="px-4 py-2 rounded-xl bg-surface-2 text-xs font-semibold text-text-secondary hover:text-white transition active:scale-95"
               >
                 Cancelar solicitud
               </button>
@@ -595,11 +537,13 @@ export const PassengerHome = () => {
                   <p className="text-xs text-text-secondary mt-0.5">{assignedDriver.trips} viajes completados</p>
                   <div className="flex items-center gap-2 mt-1">
                     <span className="px-2 py-0.5 rounded-md bg-surface-2 text-[10px] font-semibold text-white">
-                      {assignedDriver.motorcycle}
+                      {assignedDriver.motorcycle || 'Mototaxi'}
                     </span>
-                    <span className="px-2 py-0.5 rounded-md bg-gold-primary/20 text-[10px] font-bold text-gold-primary border border-gold-primary/30">
-                      {assignedDriver.plate}
-                    </span>
+                    {assignedDriver.plate && (
+                      <span className="px-2 py-0.5 rounded-md bg-gold-primary/20 text-[10px] font-bold text-gold-primary border border-gold-primary/30">
+                        {assignedDriver.plate}
+                      </span>
+                    )}
                   </div>
                 </div>
               </div>
@@ -684,6 +628,69 @@ export const PassengerHome = () => {
                 <p className="text-xs text-text-secondary mt-1">Has llegado seguro a tu destino en Riberalta.</p>
               </div>
 
+              {/* Payment Section (CASH vs QR) */}
+              <div className="p-4 rounded-2xl bg-surface-2 border border-border-custom text-left space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-semibold text-text-secondary">Total a Pagar</span>
+                  <span className="text-lg font-black text-gold-primary">{activeTrip?.price || 10} BOB</span>
+                </div>
+
+                {activeTrip?.paymentMethod === 'QR' || selectedPaymentMethod === 'QR' ? (
+                  <div className="p-3 rounded-xl bg-surface border border-gold-primary/30 space-y-2.5">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold text-white flex items-center gap-1.5">
+                        <QrCode className="w-4 h-4 text-gold-primary" />
+                        Pago mediante QR Simple
+                      </span>
+                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-gold-primary/20 text-gold-primary font-bold">
+                        Riberalta
+                      </span>
+                    </div>
+
+                    {/* QR Code Container */}
+                    <div className="p-3 bg-white rounded-xl flex flex-col items-center justify-center">
+                      <img 
+                        src={`https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=RIBERGO_PAY_${activeTrip?.id || 'DEMO'}_${activeTrip?.price || 10}BOB`}
+                        alt="QR Pago RiberGO"
+                        className="w-32 h-32 rounded-lg"
+                      />
+                      <p className="text-[10px] text-zinc-800 font-bold mt-1.5 text-center">
+                        Escanea desde tu app bancaria (BNB, BCP, Banco Unión, Fácil)
+                      </p>
+                    </div>
+
+                    {/* QR Status / Action */}
+                    {activeTrip?.paymentStatus === 'CONFIRMED' ? (
+                      <div className="p-2.5 rounded-lg bg-emerald-500/20 border border-emerald-500 text-emerald-400 text-xs font-bold flex items-center justify-center gap-2">
+                        <Check className="w-4 h-4" />
+                        <span>¡Pago confirmado por el conductor!</span>
+                      </div>
+                    ) : (activeTrip?.paymentStatus === 'WAITING_DRIVER_CONFIRM' || qrPaymentSent) ? (
+                      <div className="p-2.5 rounded-lg bg-amber-500/20 border border-amber-500/40 text-amber-300 text-xs font-semibold flex items-center justify-center gap-2 animate-pulse">
+                        <Clock className="w-4 h-4" />
+                        <span>Esperando que el conductor apruebe el pago...</span>
+                      </div>
+                    ) : (
+                      <button
+                        onClick={handleNotifyQrPaid}
+                        className="w-full py-2.5 bg-gold-primary text-background rounded-xl font-black text-xs uppercase tracking-wider flex items-center justify-center gap-1.5 shadow-md active:scale-95"
+                      >
+                        <Check className="w-4 h-4 stroke-[3]" />
+                        <span>Ya transferí por QR (Avisar al chofer)</span>
+                      </button>
+                    )}
+                  </div>
+                ) : (
+                  <div className="p-2.5 rounded-xl bg-surface border border-border-custom flex items-center justify-between text-xs">
+                    <span className="text-text-secondary flex items-center gap-1.5">
+                      <DollarSign className="w-4 h-4 text-emerald-400" />
+                      Pago en Efectivo
+                    </span>
+                    <span className="font-bold text-white">Entrega {activeTrip?.price || 10} BOB al chofer</span>
+                  </div>
+                )}
+              </div>
+
               {/* Rating selector */}
               <div className="p-4 rounded-2xl bg-surface-2 border border-border-custom space-y-2">
                 <p className="text-xs font-semibold text-text-secondary uppercase">Califica tu viaje</p>
@@ -720,6 +727,9 @@ export const PassengerHome = () => {
           )}
         </AnimatePresence>
       </div>
+
+      {/* MODAL DE NEGOCIACIÓN EN TIEMPO REAL */}
+      <NegotiationChatModal />
     </div>
   );
 };

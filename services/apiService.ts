@@ -33,6 +33,236 @@ const formatAuthIdentifier = (identifier: string): string => {
   return `${numericPhone}@ribergo.bo`;
 };
 
+// ============================================================================
+// REALTIME MULTI-TAB & FIRESTORE HYBRID SYNC BUS
+// Garantiza 0ms de latencia en pruebas locales entre pestañas (BroadcastChannel + LocalStorage Event)
+// y sincronización simultánea con Cloud Firestore.
+// ============================================================================
+
+interface SyncEvent {
+  type: 'RIDE_REQUESTED' | 'RIDE_UPDATED' | 'RIDE_CANCELLED' | 'CHAT_MESSAGE';
+  payload: any;
+  timestamp: number;
+}
+
+const RIDES_STORAGE_KEY = 'ribergo_active_rides_cache_v3';
+const CHAT_STORAGE_KEY_PREFIX = 'ribergo_chat_cache_v3_';
+const CHANNEL_NAME = 'ribergo_realtime_sync_channel';
+
+class RealtimeSyncBus {
+  private channel: BroadcastChannel | null = null;
+  private pendingRidesListeners: Set<(rides: any[]) => void> = new Set();
+  private rideListeners: Map<string, Set<(ride: any) => void>> = new Map();
+  private messageListeners: Map<string, Set<(messages: any[]) => void>> = new Map();
+
+  constructor() {
+    if (typeof window !== 'undefined') {
+      try {
+        if ('BroadcastChannel' in window) {
+          this.channel = new BroadcastChannel(CHANNEL_NAME);
+          this.channel.onmessage = (event) => {
+            this.handleIncomingEvent(event.data);
+          };
+        }
+      } catch (e) {
+        console.warn('BroadcastChannel not initialized:', e);
+      }
+
+      // Storage event listener fallback (multi-tab / multi-window)
+      window.addEventListener('storage', (e) => {
+        if (e.key === RIDES_STORAGE_KEY && e.newValue) {
+          try {
+            this.notifyPendingRides();
+            const rides = JSON.parse(e.newValue);
+            for (const r of rides) {
+              this.notifyRide(r.id, r);
+            }
+          } catch (err) {}
+        }
+        if (e.key && e.key.startsWith(CHAT_STORAGE_KEY_PREFIX)) {
+          const rId = e.key.replace(CHAT_STORAGE_KEY_PREFIX, '');
+          this.notifyMessages(rId);
+        }
+      });
+    }
+  }
+
+  private handleIncomingEvent(event: SyncEvent) {
+    if (!event || !event.type) return;
+
+    if (event.type === 'RIDE_REQUESTED' || event.type === 'RIDE_UPDATED' || event.type === 'RIDE_CANCELLED') {
+      this.notifyPendingRides();
+      if (event.payload?.id) {
+        this.notifyRide(event.payload.id, event.payload);
+      }
+    } else if (event.type === 'CHAT_MESSAGE') {
+      if (event.payload?.rideId) {
+        this.notifyMessages(event.payload.rideId);
+      }
+    }
+  }
+
+  private broadcast(event: SyncEvent) {
+    if (this.channel) {
+      try {
+        this.channel.postMessage(event);
+      } catch (e) {}
+    }
+  }
+
+  public getActiveRides(): any[] {
+    if (typeof window === 'undefined') return [];
+    try {
+      const raw = localStorage.getItem(RIDES_STORAGE_KEY);
+      if (!raw) return [];
+      const rides = JSON.parse(raw) as any[];
+      const now = Date.now();
+      // Filtrar viajes menores a 5 minutos y no completados/cancelados
+      const valid = rides.filter(r => {
+        const age = now - (r.createdAtMs || 0);
+        return age < 5 * 60 * 1000 && r.status !== 'COMPLETED' && r.status !== 'CANCELLED';
+      });
+      if (valid.length !== rides.length) {
+        localStorage.setItem(RIDES_STORAGE_KEY, JSON.stringify(valid));
+      }
+      return valid;
+    } catch (e) {
+      return [];
+    }
+  }
+
+  public saveRide(ride: any) {
+    if (typeof window === 'undefined') return;
+    try {
+      const rides = this.getActiveRides();
+      const idx = rides.findIndex(r => r.id === ride.id);
+      const updatedItem = {
+        ...(idx >= 0 ? rides[idx] : {}),
+        ...ride,
+        updatedAtMs: Date.now()
+      };
+      if (idx >= 0) {
+        rides[idx] = updatedItem;
+      } else {
+        rides.unshift(updatedItem);
+      }
+      localStorage.setItem(RIDES_STORAGE_KEY, JSON.stringify(rides));
+      this.broadcast({ type: 'RIDE_UPDATED', payload: updatedItem, timestamp: Date.now() });
+      this.notifyPendingRides();
+      this.notifyRide(updatedItem.id, updatedItem);
+    } catch (e) {
+      console.warn('Error saving ride to sync bus:', e);
+    }
+  }
+
+  public getRide(rideId: string): any | null {
+    const rides = this.getActiveRides();
+    return rides.find(r => r.id === rideId) || null;
+  }
+
+  public removeRide(rideId: string) {
+    if (typeof window === 'undefined') return;
+    try {
+      const rides = this.getActiveRides().filter(r => r.id !== rideId);
+      localStorage.setItem(RIDES_STORAGE_KEY, JSON.stringify(rides));
+      this.broadcast({ type: 'RIDE_CANCELLED', payload: { id: rideId, status: 'CANCELLED' }, timestamp: Date.now() });
+      this.notifyPendingRides();
+      this.notifyRide(rideId, { id: rideId, status: 'CANCELLED' });
+    } catch (e) {}
+  }
+
+  public getPendingRides(): any[] {
+    const rides = this.getActiveRides();
+    return rides.filter(r => r.status === 'SEARCHING_DRIVER' && !r.driverId);
+  }
+
+  public subscribePendingRides(callback: (rides: any[]) => void): () => void {
+    this.pendingRidesListeners.add(callback);
+    callback(this.getPendingRides());
+
+    return () => {
+      this.pendingRidesListeners.delete(callback);
+    };
+  }
+
+  public notifyPendingRides() {
+    const pending = this.getPendingRides();
+    this.pendingRidesListeners.forEach(cb => {
+      try { cb(pending); } catch (e) {}
+    });
+  }
+
+  public subscribeRide(rideId: string, callback: (ride: any) => void): () => void {
+    if (!this.rideListeners.has(rideId)) {
+      this.rideListeners.set(rideId, new Set());
+    }
+    this.rideListeners.get(rideId)!.add(callback);
+
+    const existing = this.getRide(rideId);
+    if (existing) {
+      callback(existing);
+    }
+
+    return () => {
+      this.rideListeners.get(rideId)?.delete(callback);
+    };
+  }
+
+  public notifyRide(rideId: string, rideData: any) {
+    const listeners = this.rideListeners.get(rideId);
+    if (listeners) {
+      listeners.forEach(cb => {
+        try { cb(rideData); } catch (e) {}
+      });
+    }
+  }
+
+  public getMessages(rideId: string): any[] {
+    if (typeof window === 'undefined') return [];
+    try {
+      const raw = localStorage.getItem(CHAT_STORAGE_KEY_PREFIX + rideId);
+      return raw ? JSON.parse(raw) : [];
+    } catch (e) {
+      return [];
+    }
+  }
+
+  public saveMessage(rideId: string, message: any) {
+    if (typeof window === 'undefined') return;
+    try {
+      const msgs = this.getMessages(rideId);
+      msgs.push(message);
+      localStorage.setItem(CHAT_STORAGE_KEY_PREFIX + rideId, JSON.stringify(msgs));
+      this.broadcast({ type: 'CHAT_MESSAGE', payload: { rideId, message }, timestamp: Date.now() });
+      this.notifyMessages(rideId);
+    } catch (e) {}
+  }
+
+  public subscribeMessages(rideId: string, callback: (messages: any[]) => void): () => void {
+    if (!this.messageListeners.has(rideId)) {
+      this.messageListeners.set(rideId, new Set());
+    }
+    this.messageListeners.get(rideId)!.add(callback);
+    callback(this.getMessages(rideId));
+
+    return () => {
+      this.messageListeners.get(rideId)?.delete(callback);
+    };
+  }
+
+  public notifyMessages(rideId: string) {
+    const msgs = this.getMessages(rideId);
+    const listeners = this.messageListeners.get(rideId);
+    if (listeners) {
+      listeners.forEach(cb => {
+        try { cb(msgs); } catch (e) {}
+      });
+    }
+  }
+}
+
+export const realtimeSyncBus = new RealtimeSyncBus();
+
 export const apiService = {
   /**
    * Check if a user with given phone exists in Cloud Firestore 'users'
@@ -391,32 +621,23 @@ export const apiService = {
     return () => {};
   },
 
+
+
   /**
-   * Create a new mototaxi ride request in Cloud Firestore
+   * Create a new mototaxi ride request in Cloud Firestore & RealtimeSyncBus
    */
-  async requestRide(pickup: LocationPoint, destination: LocationPoint, price: number, passengerId: string, passengerName: string): Promise<ActiveTripInfo> {
+  async requestRide(
+    pickup: LocationPoint, 
+    destination: LocationPoint, 
+    price: number, 
+    passengerId: string, 
+    passengerName: string,
+    paymentMethod: 'CASH' | 'QR' = 'CASH'
+  ): Promise<ActiveTripInfo> {
     const rideId = 'ride-' + Date.now();
+    const nowMs = Date.now();
 
-    if (isFirebaseConfigured()) {
-      try {
-        await setDoc(doc(db, 'rides', rideId), {
-          id: rideId,
-          pickup,
-          destination,
-          price,
-          distanceKm: 2.4,
-          durationMin: 6,
-          passengerId,
-          passengerName,
-          status: 'SEARCHING_DRIVER',
-          createdAt: serverTimestamp(),
-        });
-      } catch (err) {
-        console.error('Firestore Request Ride Error:', err);
-      }
-    }
-
-    return {
+    const tripData: ActiveTripInfo = {
       id: rideId,
       pickup,
       destination,
@@ -425,62 +646,154 @@ export const apiService = {
       durationMin: 6,
       passengerId,
       passengerName,
+      paymentMethod,
+      paymentStatus: 'PENDING',
+    };
+
+    // 1. Guardar y emitir inmediatamente en RealtimeSyncBus (0ms de latencia)
+    realtimeSyncBus.saveRide({
+      ...tripData,
+      status: 'SEARCHING_DRIVER',
+      createdAtMs: nowMs,
+    });
+
+    // 2. Persistir en Firestore de fondo si está configurado
+    if (isFirebaseConfigured()) {
+      try {
+        setDoc(doc(db, 'rides', rideId), {
+          ...tripData,
+          status: 'SEARCHING_DRIVER',
+          createdAtMs: nowMs,
+          createdAt: serverTimestamp(),
+        }).catch((err) => {
+          console.warn('Firestore setDoc background error:', err?.message || err);
+        });
+      } catch (err) {
+        console.warn('Firestore Request Ride Error:', err);
+      }
+    }
+
+    return tripData;
+  },
+
+  /**
+   * Listen to real-time updates for a specific ride (híbrido RealtimeSyncBus + Firestore)
+   */
+  subscribeToRide(rideId: string, callback: (ride: any) => void) {
+    // 1. Suscribirse inmediatamente a RealtimeSyncBus
+    const unsubBus = realtimeSyncBus.subscribeRide(rideId, callback);
+
+    // 2. Suscribirse a Firestore si está disponible
+    let unsubFirestore = () => {};
+    if (isFirebaseConfigured()) {
+      try {
+        unsubFirestore = onSnapshot(
+          doc(db, 'rides', rideId),
+          (snapshot) => {
+            if (snapshot.exists()) {
+              const data = snapshot.data();
+              realtimeSyncBus.saveRide(data);
+              callback(data);
+            }
+          },
+          (err) => {
+            console.warn('Firestore ride listener permission error:', err?.message || err);
+          }
+        );
+      } catch (e) {
+        console.warn('Firestore subscribeToRide error:', e);
+      }
+    }
+
+    return () => {
+      unsubBus();
+      unsubFirestore();
     };
   },
 
   /**
-   * Listen to real-time updates for a specific ride
-   */
-  subscribeToRide(rideId: string, callback: (ride: any) => void) {
-    if (isFirebaseConfigured()) {
-      return onSnapshot(
-        doc(db, 'rides', rideId),
-        (snapshot) => {
-          if (snapshot.exists()) {
-            callback(snapshot.data());
-          }
-        },
-        (err) => {
-          console.warn('Firestore ride listener permission error:', err?.message || err);
-        }
-      );
-    }
-    return () => {};
-  },
-
-  /**
-   * Listen to pending ride requests for online drivers
+   * Listen to pending ride requests for online drivers (en tiempo real)
    */
   subscribeToPendingRides(callback: (rides: any[]) => void) {
+    // 1. Suscribirse inmediatamente a RealtimeSyncBus (0ms)
+    const unsubBus = realtimeSyncBus.subscribePendingRides((busPending) => {
+      callback(busPending);
+    });
+
+    // 2. Suscribirse también a Firestore si está disponible
+    let unsubFirestore = () => {};
     if (isFirebaseConfigured()) {
-      const q = query(collection(db, 'rides'), where('status', '==', 'SEARCHING_DRIVER'));
-      return onSnapshot(
-        q,
-        (snapshot) => {
-          const ridesList = snapshot.docs.map(docSnap => ({
-            id: docSnap.id,
-            ...docSnap.data()
-          }));
-          callback(ridesList);
-        },
-        (err) => {
-          console.warn('Firestore pending rides listener permission error:', err?.message || err);
-          callback([]);
-        }
-      );
+      try {
+        const q = query(
+          collection(db, 'rides'), 
+          where('status', '==', 'SEARCHING_DRIVER')
+        );
+        unsubFirestore = onSnapshot(
+          q,
+          (snapshot) => {
+            const freshPendingRides = snapshot.docs
+              .map(docSnap => ({
+                id: docSnap.id,
+                ...docSnap.data()
+              } as any))
+              .filter(r => {
+                if (r.status !== 'SEARCHING_DRIVER') return false;
+                if (r.driverId) return false;
+                // Filtrar solo viajes recientes (menos de 5 minutos)
+                const age = Date.now() - (r.createdAtMs || 0);
+                if (r.createdAtMs && age > 5 * 60 * 1000) return false;
+                return true;
+              })
+              .sort((a, b) => {
+                const timeA = a.createdAtMs || (a.createdAt?.toMillis ? a.createdAt.toMillis() : 0);
+                const timeB = b.createdAtMs || (b.createdAt?.toMillis ? b.createdAt.toMillis() : 0);
+                return timeB - timeA;
+              });
+
+            // Sincronizar hacia RealtimeSyncBus
+            freshPendingRides.forEach(r => realtimeSyncBus.saveRide(r));
+            callback(realtimeSyncBus.getPendingRides());
+          },
+          (err) => {
+            console.warn('Firestore pending rides listener permission error (usando bus local):', err?.message || err);
+            // El bus local ya proveyó los datos
+          }
+        );
+      } catch (e) {
+        console.warn('Firestore query error:', e);
+      }
     }
-    callback([]);
-    return () => {};
+
+    return () => {
+      unsubBus();
+      unsubFirestore();
+    };
   },
 
   /**
-   * Driver accepts ride in Cloud Firestore
+   * Driver accepts ride in Cloud Firestore and enters NEGOTIATING phase
    */
   async acceptRide(rideId: string, driver: DriverData) {
+    const updatePayload = {
+      id: rideId,
+      status: 'NEGOTIATING',
+      driverId: driver.id,
+      driverName: driver.name,
+      driverPhone: driver.phone,
+      driverRating: driver.rating,
+      motorcycle: driver.motorcycle,
+      plate: driver.plate,
+      acceptedAtMs: Date.now(),
+    };
+
+    // 1. Notificar inmediatamente al bus (0ms)
+    realtimeSyncBus.saveRide(updatePayload);
+
+    // 2. Persistir en Firestore de fondo
     if (isFirebaseConfigured()) {
       try {
         await updateDoc(doc(db, 'rides', rideId), {
-          status: 'GOING_TO_PASSENGER',
+          status: 'NEGOTIATING',
           driverId: driver.id,
           driverName: driver.name,
           driverPhone: driver.phone,
@@ -490,7 +803,123 @@ export const apiService = {
           acceptedAt: serverTimestamp(),
         });
       } catch (err) {
-        console.error('Firestore Accept Ride Error:', err);
+        console.warn('Firestore Accept Ride Error:', err);
+      }
+    }
+  },
+
+  /**
+   * Propose a new fare or destination during negotiation
+   */
+  async proposeRideFare(rideId: string, proposedPrice: number, offeredBy: 'PASSENGER' | 'DRIVER', destinationName?: string) {
+    const current = realtimeSyncBus.getRide(rideId) || {};
+    const updatePayload: any = {
+      ...current,
+      id: rideId,
+      proposedPrice,
+      priceOfferedBy: offeredBy,
+      updatedAtMs: Date.now(),
+    };
+    if (destinationName) {
+      updatePayload.destination = {
+        ...(current.destination || { lat: -11.0061, lng: -66.0747 }),
+        name: destinationName,
+      };
+    }
+
+    realtimeSyncBus.saveRide(updatePayload);
+
+    if (isFirebaseConfigured()) {
+      try {
+        const updateData: any = {
+          proposedPrice,
+          priceOfferedBy: offeredBy,
+          updatedAt: serverTimestamp(),
+        };
+        if (destinationName) {
+          updateData['destination.name'] = destinationName;
+        }
+        await updateDoc(doc(db, 'rides', rideId), updateData);
+      } catch (err) {
+        console.warn('Firestore Propose Fare Error:', err);
+      }
+    }
+  },
+
+  /**
+   * Confirm the negotiated fare and start going to passenger
+   */
+  async confirmRideFare(rideId: string, finalPrice: number, finalDestination?: string) {
+    const current = realtimeSyncBus.getRide(rideId) || {};
+    const updatePayload: any = {
+      ...current,
+      id: rideId,
+      price: finalPrice,
+      proposedPrice: finalPrice,
+      fareAgreed: true,
+      status: 'GOING_TO_PASSENGER',
+      updatedAtMs: Date.now(),
+    };
+    if (finalDestination) {
+      updatePayload.destination = {
+        ...(current.destination || { lat: -11.0061, lng: -66.0747 }),
+        name: finalDestination,
+      };
+    }
+
+    realtimeSyncBus.saveRide(updatePayload);
+
+    if (isFirebaseConfigured()) {
+      try {
+        const updateData: any = {
+          price: finalPrice,
+          proposedPrice: finalPrice,
+          fareAgreed: true,
+          status: 'GOING_TO_PASSENGER',
+          updatedAt: serverTimestamp(),
+        };
+        if (finalDestination) {
+          updateData['destination.name'] = finalDestination;
+        }
+        await updateDoc(doc(db, 'rides', rideId), updateData);
+      } catch (err) {
+        console.warn('Firestore Confirm Fare Error:', err);
+      }
+    }
+  },
+
+  /**
+   * Cancel negotiation and release ride back to searching
+   */
+  async cancelRideNegotiation(rideId: string) {
+    const current = realtimeSyncBus.getRide(rideId) || {};
+    const updated: any = {
+      ...current,
+      id: rideId,
+      status: 'SEARCHING_DRIVER',
+    };
+    delete updated.driverId;
+    delete updated.driverName;
+    delete updated.driverPhone;
+    delete updated.proposedPrice;
+    delete updated.priceOfferedBy;
+
+    realtimeSyncBus.saveRide(updated);
+
+    if (isFirebaseConfigured()) {
+      try {
+        const { deleteField } = await import('firebase/firestore');
+        await updateDoc(doc(db, 'rides', rideId), {
+          status: 'SEARCHING_DRIVER',
+          driverId: deleteField(),
+          driverName: deleteField(),
+          driverPhone: deleteField(),
+          proposedPrice: deleteField(),
+          priceOfferedBy: deleteField(),
+          updatedAt: serverTimestamp(),
+        });
+      } catch (err) {
+        console.warn('Firestore Cancel Negotiation Error:', err);
       }
     }
   },
@@ -499,6 +928,15 @@ export const apiService = {
    * Update ride status (GOING_TO_PASSENGER -> TRIP_STARTED -> COMPLETED)
    */
   async updateRideStatus(rideId: string, status: string) {
+    const current = realtimeSyncBus.getRide(rideId) || {};
+    const updated = {
+      ...current,
+      id: rideId,
+      status,
+      updatedAtMs: Date.now(),
+    };
+    realtimeSyncBus.saveRide(updated);
+
     if (isFirebaseConfigured()) {
       try {
         await updateDoc(doc(db, 'rides', rideId), {
@@ -506,7 +944,7 @@ export const apiService = {
           updatedAt: serverTimestamp(),
         });
       } catch (err) {
-        console.error('Firestore Update Ride Status Error:', err);
+        console.warn('Firestore Update Ride Status Error:', err);
       }
     }
   },
@@ -515,61 +953,96 @@ export const apiService = {
    * Send real-time chat message inside ride
    */
   async sendMessage(rideId: string, senderRole: 'PASSENGER' | 'DRIVER', text: string) {
-    if (isFirebaseConfigured()) {
-      try {
-        await addDoc(collection(db, 'rides', rideId, 'messages'), {
-          sender: senderRole,
-          text,
-          createdAt: serverTimestamp(),
-        });
-      } catch (err) {
-        console.error('Firestore Send Message Error:', err);
-      }
-    }
-    return {
-      id: 'msg-' + Date.now(),
+    const msg = {
+      id: 'msg-' + Date.now() + '-' + Math.random().toString(36).substr(2, 4),
       sender: senderRole,
       text,
       time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      createdAtMs: Date.now(),
     };
+
+    // Guardar y emitir inmediatamente por el bus local
+    realtimeSyncBus.saveMessage(rideId, msg);
+
+    if (isFirebaseConfigured()) {
+      try {
+        addDoc(collection(db, 'rides', rideId, 'messages'), {
+          sender: senderRole,
+          text,
+          createdAt: serverTimestamp(),
+        }).catch((err) => {
+          console.warn('Firestore addDoc chat error:', err?.message || err);
+        });
+      } catch (err) {
+        console.warn('Firestore Send Message Error:', err);
+      }
+    }
+    return msg;
   },
 
   /**
    * Listen to real-time chat messages for a ride
    */
   subscribeToMessages(rideId: string, callback: (messages: any[]) => void) {
+    const unsubBus = realtimeSyncBus.subscribeMessages(rideId, callback);
+
+    let unsubFirestore = () => {};
     if (isFirebaseConfigured()) {
-      const q = query(collection(db, 'rides', rideId, 'messages'), orderBy('createdAt', 'asc'));
-      return onSnapshot(
-        q,
-        (snapshot) => {
-          const msgs = snapshot.docs.map((docSnap) => ({
-            id: docSnap.id,
-            ...docSnap.data(),
-            time: docSnap.data().createdAt?.toDate()?.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) || 'Ahora',
-          }));
-          callback(msgs);
-        },
-        (err) => {
-          console.warn('Firestore chat messages listener error:', err?.message || err);
-          callback([]);
-        }
-      );
+      try {
+        const q = query(collection(db, 'rides', rideId, 'messages'), orderBy('createdAt', 'asc'));
+        unsubFirestore = onSnapshot(
+          q,
+          (snapshot) => {
+            const msgs = snapshot.docs.map((docSnap) => ({
+              id: docSnap.id,
+              ...docSnap.data(),
+              time: docSnap.data().createdAt?.toDate()?.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) || 'Ahora',
+            }));
+            if (msgs.length > 0) {
+              callback(msgs);
+            }
+          },
+          (err) => {
+            console.warn('Firestore chat messages listener error (usando bus local):', err?.message || err);
+          }
+        );
+      } catch (e) {
+        console.warn('Firestore subscribeToMessages error:', e);
+      }
     }
-    return () => {};
+
+    return () => {
+      unsubBus();
+      unsubFirestore();
+    };
   },
 
   /**
-   * Top-up driver wallet balance in Cloud Firestore
+   * Top-up driver wallet balance in Cloud Firestore and record transaction in 'wallet_recharges'
    */
-  async topUpDriverWallet(driverId: string, amount: number, currentBalance: number = 0): Promise<number> {
+  async topUpDriverWallet(driverId: string, amount: number, currentBalance: number = 0, transferReference?: string): Promise<number> {
     const newBalance = (currentBalance || 0) + amount;
     if (isFirebaseConfigured() && driverId) {
       try {
-        await updateDoc(doc(db, 'users', driverId), {
+        const rechargeId = 'rec-' + Date.now();
+        // 1. Guardar la recarga en la colección 'wallet_recharges'
+        await setDoc(doc(db, 'wallet_recharges', rechargeId), {
+          id: rechargeId,
+          driverId,
+          amount,
+          previousBalance: currentBalance || 0,
+          newBalance,
+          paymentMethod: 'QR_BOLIVIA',
+          reference: transferReference || `QR-PAGO-${driverId}-${Date.now().toString().slice(-6)}`,
+          status: 'COMPLETED',
+          timestamp: serverTimestamp(),
+        });
+
+        // 2. Actualizar el saldo del conductor en 'users'
+        await setDoc(doc(db, 'users', driverId), {
           walletBalance: newBalance,
           updatedAt: serverTimestamp(),
-        });
+        }, { merge: true });
       } catch (err) {
         console.error('Firestore topUpDriverWallet Error:', err);
       }
@@ -578,15 +1051,31 @@ export const apiService = {
   },
 
   /**
+   * Update arbitrary user profile fields in Cloud Firestore
+   */
+  async updateUserProfileFirestore(userId: string, data: Partial<UserProfile>) {
+    if (isFirebaseConfigured() && userId) {
+      try {
+        await setDoc(doc(db, 'users', userId), {
+          ...data,
+          updatedAt: serverTimestamp(),
+        }, { merge: true });
+      } catch (err) {
+        console.error('Firestore updateUserProfileFirestore Error:', err);
+      }
+    }
+  },
+
+  /**
    * Mark driver onboarding tutorial as completed in Cloud Firestore
    */
   async setDriverTutorialCompleted(driverId: string) {
     if (isFirebaseConfigured() && driverId) {
       try {
-        await updateDoc(doc(db, 'users', driverId), {
+        await setDoc(doc(db, 'users', driverId), {
           hasCompletedDriverTutorial: true,
           updatedAt: serverTimestamp(),
-        });
+        }, { merge: true });
       } catch (err) {
         console.error('Firestore setDriverTutorialCompleted Error:', err);
       }
@@ -600,15 +1089,79 @@ export const apiService = {
     const newBalance = Math.max(0, (currentBalance || 0) - commissionFee);
     if (isFirebaseConfigured() && driverId) {
       try {
-        await updateDoc(doc(db, 'users', driverId), {
+        await setDoc(doc(db, 'users', driverId), {
           walletBalance: newBalance,
           updatedAt: serverTimestamp(),
-        });
+        }, { merge: true });
       } catch (err) {
         console.error('Firestore deductTripCommission Error:', err);
       }
     }
     return newBalance;
+  },
+
+  /**
+   * Decrement gift free trips remaining for a driver in Cloud Firestore
+   */
+  async decrementDriverFreeTrips(driverId: string, currentFreeTrips: number = 0): Promise<number> {
+    const newRemaining = Math.max(0, (currentFreeTrips || 0) - 1);
+    if (isFirebaseConfigured() && driverId) {
+      try {
+        await setDoc(doc(db, 'users', driverId), {
+          freeTripsRemaining: newRemaining,
+          updatedAt: serverTimestamp(),
+        }, { merge: true });
+      } catch (err) {
+        console.error('Firestore decrementDriverFreeTrips Error:', err);
+      }
+    }
+    return newRemaining;
+  },
+
+  /**
+   * Driver marks QR payment as confirmed and updates ride status in Cloud Firestore & RealtimeSyncBus
+   */
+  async confirmRideQrPayment(rideId: string) {
+    const current = realtimeSyncBus.getRide(rideId) || {};
+    realtimeSyncBus.saveRide({
+      ...current,
+      id: rideId,
+      paymentStatus: 'CONFIRMED',
+    });
+
+    if (isFirebaseConfigured() && rideId) {
+      try {
+        await updateDoc(doc(db, 'rides', rideId), {
+          paymentStatus: 'CONFIRMED',
+          paymentConfirmedAt: serverTimestamp(),
+        });
+      } catch (err) {
+        console.warn('Firestore confirmRideQrPayment Error:', err);
+      }
+    }
+  },
+
+  /**
+   * Passenger indicates they sent the QR payment and is waiting for driver approval
+   */
+  async submitRideQrPayment(rideId: string) {
+    const current = realtimeSyncBus.getRide(rideId) || {};
+    realtimeSyncBus.saveRide({
+      ...current,
+      id: rideId,
+      paymentStatus: 'WAITING_DRIVER_CONFIRM',
+    });
+
+    if (isFirebaseConfigured() && rideId) {
+      try {
+        await updateDoc(doc(db, 'rides', rideId), {
+          paymentStatus: 'WAITING_DRIVER_CONFIRM',
+          paymentSentAt: serverTimestamp(),
+        });
+      } catch (err) {
+        console.warn('Firestore submitRideQrPayment Error:', err);
+      }
+    }
   },
 
   /**

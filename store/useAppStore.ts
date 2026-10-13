@@ -11,6 +11,7 @@ export type PassengerRideState =
   | 'SELECTING_DESTINATION' 
   | 'CONFIRMING'
   | 'SEARCHING_DRIVER' 
+  | 'NEGOTIATING'
   | 'DRIVER_FOUND' 
   | 'TRIP_STARTED' 
   | 'TRIP_COMPLETED';
@@ -19,6 +20,7 @@ export type DriverRideState =
   | 'OFFLINE' 
   | 'ONLINE' 
   | 'RIDE_REQUEST' 
+  | 'NEGOTIATING'
   | 'GOING_TO_PASSENGER' 
   | 'TRIP_STARTED' 
   | 'TRIP_COMPLETED';
@@ -43,18 +45,24 @@ export type UserProfile = {
   motorcycle?: string;
   plate?: string;
   verified?: boolean;
-  walletBalance?: number; // Balance in BOB (e.g. 50.00 BOB)
+  walletBalance?: number; // Balance in BOB (e.g. 10.00, 20.00, 50.00 BOB)
   accountNumber?: string; // Digital Card Account No (e.g. RBT-4820-9182)
   hasCompletedDriverTutorial?: boolean;
+  freeTripsRemaining?: number; // 5 viajes de regalo sin comisión en su primera bienvenida
 };
 
 export type ServiceType = 'MOTOTAXI' | 'REMOLCADA';
+export type PaymentMethodType = 'CASH' | 'QR';
+export type PaymentStatusType = 'PENDING' | 'WAITING_DRIVER_CONFIRM' | 'CONFIRMED';
 
 export interface ActiveTripInfo {
   id: string;
   pickup: LocationPoint;
   destination: LocationPoint;
   price: number;
+  proposedPrice?: number;
+  priceOfferedBy?: 'PASSENGER' | 'DRIVER';
+  fareAgreed?: boolean;
   distanceKm: number;
   durationMin: number;
   driver?: DriverData;
@@ -63,6 +71,9 @@ export interface ActiveTripInfo {
   passengerPhone?: string;
   passengerRating?: number;
   serviceType?: ServiceType;
+  paymentMethod?: PaymentMethodType;
+  paymentStatus?: PaymentStatusType;
+  status?: string;
 }
 
 export interface TerminalDeparture {
@@ -226,6 +237,8 @@ interface AppState {
   topUpWallet: (amount: number) => void;
   setHasCompletedDriverTutorial: (completed: boolean) => void;
   deductWalletCommission: (amount: number) => void;
+  decrementFreeTrips: () => void;
+  updateUserProfile: (data: Partial<UserProfile>) => void;
 
   // Reset current ride
   resetRide: () => void;
@@ -244,14 +257,18 @@ export const useAppStore = create<AppState>()(
       pendingRegisterPhone: '',
       setPendingRegisterPhone: (phone) => set({ pendingRegisterPhone: phone }),
       loginUser: (user) => {
-        // Guarantee default driver wallet balance (50 BOB welcome bonus) and account number if missing
+        // Driver wallet starts strictly with real balance (0 BOB if new). 5 free gift rides only if new driver.
         const updatedUser: UserProfile = {
           ...user,
-          walletBalance: typeof user.walletBalance === 'number' ? user.walletBalance : 50.00,
+          walletBalance: typeof user.walletBalance === 'number' ? user.walletBalance : 0.00,
           accountNumber: user.accountNumber || `RBT-4820-${Math.floor(1000 + Math.random() * 9000)}`,
+          freeTripsRemaining: typeof user.freeTripsRemaining === 'number' ? user.freeTripsRemaining : (user.role === 'DRIVER' ? 5 : 0),
         };
         set({ user: updatedUser, role: updatedUser.role, currentView: 'MAIN_APP', activeTab: 'HOME' });
       },
+      updateUserProfile: (data) => set((state) => ({
+        user: state.user ? { ...state.user, ...data } : null,
+      })),
       setRole: (role) => set({ role, activeTab: 'HOME' }),
       logout: () => set({ 
         user: null, 
@@ -364,6 +381,11 @@ export const useAppStore = create<AppState>()(
         if (!state.user) return {};
         const newBal = Math.max(0, (state.user.walletBalance || 0) - amount);
         return { user: { ...state.user, walletBalance: newBal } };
+      }),
+      decrementFreeTrips: () => set((state) => {
+        if (!state.user) return {};
+        const remaining = Math.max(0, (state.user.freeTripsRemaining || 0) - 1);
+        return { user: { ...state.user, freeTripsRemaining: remaining } };
       }),
 
       resetRide: () => set({

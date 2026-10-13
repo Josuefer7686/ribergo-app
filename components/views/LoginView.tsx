@@ -10,6 +10,8 @@ import { CustomNumericKeypad } from '@/components/shared/CustomNumericKeypad';
 import { OtpPinInput } from '@/components/shared/OtpPinInput';
 import { IosToastOverlay } from '@/components/shared/IosToastOverlay';
 import { IosSpinner } from '@/components/shared/IosSpinner';
+import { db, isFirebaseConfigured } from '@/lib/firebase';
+import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
 
 export const LoginView = () => {
   const { setCurrentView, loginUser, setRole, setPendingRegisterPhone } = useAppStore();
@@ -181,27 +183,6 @@ export const LoginView = () => {
     }
   };
 
-  // Demo Fallback
-  const handleDemoLogin = (role: UserRole) => {
-    haptics.heavy();
-    const demoProfile = {
-      id: role === 'PASSENGER' ? 'usr-demo-p' : 'usr-demo-d',
-      name: role === 'PASSENGER' ? 'Fernando (Pasajero)' : 'Carlos (Conductor)',
-      email: role === 'PASSENGER' ? 'pasajero@ribergo.bo' : 'conductor@ribergo.bo',
-      phone: '+591 76868110',
-      rating: 5.0,
-      trips: 18,
-      role: role,
-      motorcycle: 'Honda Wave 110',
-      plate: 'RBT-482',
-      verified: true,
-    };
-    setPendingUserProfile(demoProfile);
-    setSuccessTitle('¡Modo Demo!');
-    setSuccessSubtitle(`Accediendo como ${demoProfile.name}`);
-    setShowSuccess(true);
-  };
-
   const handleGoToRegister = () => {
     haptics.selection();
     setShowUnregisteredModal(false);
@@ -344,27 +325,6 @@ export const LoginView = () => {
             </>
           )}
         </button>
-
-        {/* Quick Demo Options */}
-        <div className="grid grid-cols-2 gap-2 mt-2">
-          <button
-            type="button"
-            onClick={() => handleDemoLogin('PASSENGER')}
-            className="py-2 bg-surface-2 hover:bg-surface border border-gold-primary/40 rounded-xl font-bold text-[11px] text-gold-primary flex items-center justify-center gap-1 transition"
-          >
-            <User className="w-3.5 h-3.5" />
-            <span>Demo Pasajero</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => handleDemoLogin('DRIVER')}
-            className="py-2 bg-surface-2 hover:bg-surface border border-gold-primary/40 rounded-xl font-bold text-[11px] text-gold-primary flex items-center justify-center gap-1 transition"
-          >
-            <Bike className="w-3.5 h-3.5" />
-            <span>Demo Conductor</span>
-          </button>
-        </div>
       </div>
 
       {/* Footer Register Link */}

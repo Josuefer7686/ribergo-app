@@ -75,28 +75,30 @@ export const ProfileView = () => {
           </div>
         </div>
 
-        {/* DRIVER REGISTRATION / SECURITY INFO BANNER */}
-        <div className="p-4 rounded-2xl bg-surface-2 border border-gold-primary/30 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-gold-primary/10 border border-gold-primary/30 flex items-center justify-center text-gold-primary">
-              <Bike className="w-5 h-5" />
+        {/* DRIVER REGISTRATION / SECURITY INFO BANNER (SOLO PARA PASAJEROS) */}
+        {isPassenger && (
+          <div className="p-4 rounded-2xl bg-surface-2 border border-gold-primary/30 flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-gold-primary/10 border border-gold-primary/30 flex items-center justify-center text-gold-primary">
+                <Bike className="w-5 h-5" />
+              </div>
+              <div>
+                <p className="text-xs font-bold text-white">¿Quieres ser Conductor en Riberalta?</p>
+                <p className="text-[10px] text-text-secondary">Inscripción y verificación de mototaxi</p>
+              </div>
             </div>
-            <div>
-              <p className="text-xs font-bold text-white">¿Quieres ser Conductor en Riberalta?</p>
-              <p className="text-[10px] text-text-secondary">Inscripción y verificación de mototaxi</p>
-            </div>
-          </div>
 
-          <button
-            onClick={() => {
-              haptics.impact();
-              setActiveModal('DRIVER_REGISTRATION');
-            }}
-            className="px-3 py-2 rounded-xl bg-gold-primary text-background font-black text-xs hover:bg-gold-light transition shadow-md shadow-gold-primary/20 active:scale-95 whitespace-nowrap"
-          >
-            Requisitos
-          </button>
-        </div>
+            <button
+              onClick={() => {
+                haptics.impact();
+                setActiveModal('DRIVER_REGISTRATION');
+              }}
+              className="px-3 py-2 rounded-xl bg-gold-primary text-background font-black text-xs hover:bg-gold-light transition shadow-md shadow-gold-primary/20 active:scale-95 whitespace-nowrap"
+            >
+              Requisitos
+            </button>
+          </div>
+        )}
 
         {/* PUSH NOTIFICATIONS PERMISSION BANNER */}
         {notifPermission !== 'granted' && (
@@ -189,24 +191,6 @@ export const ProfileView = () => {
 
         {/* Functional Menu Items */}
         <div className="p-2 rounded-3xl bg-surface border border-border-custom space-y-1">
-          <button 
-            onClick={() => {
-              haptics.selection();
-              setActiveModal('PAYMENTS');
-            }}
-            className="w-full p-3.5 rounded-2xl hover:bg-surface-2 flex items-center justify-between text-xs group transition"
-          >
-            <div className="flex items-center gap-3">
-              <CreditCard className="w-4 h-4 text-gold-primary" />
-              <span className="font-semibold text-white">Métodos de Pago</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="text-[10px] font-bold text-gold-primary uppercase">
-                {preferences.paymentMethod === 'CASH' ? 'Efectivo BOB' : preferences.paymentMethod === 'QR' ? 'QR Bolivia' : 'Tarjeta'}
-              </span>
-              <ChevronRight className="w-4 h-4 text-text-secondary group-hover:text-gold-primary transition" />
-            </div>
-          </button>
 
           <button 
             onClick={() => {

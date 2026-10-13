@@ -22,7 +22,7 @@ export const IncomeView = () => {
   const todayTripsCount = todayTripsList.length;
 
   const totalIncome = tripsHistory.reduce((sum, t) => sum + (t.price || 0), 0);
-  const currentBalance = user?.walletBalance ?? 50.0;
+  const currentBalance = user?.walletBalance ?? 0.0;
 
   // Daily breakdown array
   const daysOfWeek = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'];

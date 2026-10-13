@@ -1,9 +1,9 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { IosModal } from '@/components/shared/IosModal';
 import { useAppStore } from '@/store/useAppStore';
-import { QrCode, CheckCircle2, ShieldCheck, Copy, Check, Sparkles, RefreshCw } from 'lucide-react';
+import { QrCode, CheckCircle2, ShieldCheck, Download, Check, Sparkles, RefreshCw, Upload, Image as ImageIcon, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { haptics } from '@/utils/haptics';
 import { audio } from '@/utils/audio';
@@ -17,24 +17,79 @@ interface QrTopupModalProps {
 
 export const QrTopupModal = ({ isOpen, onClose, onSuccess }: QrTopupModalProps) => {
   const { user, loginUser, topUpWallet } = useAppStore();
-  const [selectedAmount, setSelectedAmount] = useState<number>(50);
+  const [selectedAmount, setSelectedAmount] = useState<number>(20);
+  const [receiptImage, setReceiptImage] = useState<string | null>(null);
+  const [errorMsg, setErrorMsg] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
-  const [copied, setCopied] = useState(false);
+  const [downloading, setDownloading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const driverId = user?.id || 'drv-demo';
-  const currentBalance = user?.walletBalance !== undefined ? user.walletBalance : 50;
+  const driverId = user?.id || 'drv-unregistered';
+  const currentBalance = typeof user?.walletBalance === 'number' ? user.walletBalance : 0.0;
+  const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=RIBERGO-TOPUP-${selectedAmount}BOB-DRIVER-${driverId}&color=05080B`;
+
+  // Download QR image to gallery
+  const handleDownloadQr = async () => {
+    haptics.selection();
+    setDownloading(true);
+    try {
+      const response = await fetch(qrUrl);
+      const blob = await response.blob();
+      const blobUrl = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = blobUrl;
+      link.download = `ribergo-recarga-${selectedAmount}bob.png`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(blobUrl);
+      haptics.success();
+    } catch (e) {
+      console.error('Error al descargar imagen QR:', e);
+      // Fallback
+      window.open(qrUrl, '_blank');
+    } finally {
+      setTimeout(() => setDownloading(false), 1500);
+    }
+  };
+
+  // Handle receipt image upload
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      if (file.size > 10 * 1024 * 1024) {
+        setErrorMsg('La imagen es demasiado pesada. Máximo 10MB.');
+        return;
+      }
+      setErrorMsg('');
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setReceiptImage(reader.result as string);
+        haptics.selection();
+      };
+      reader.readAsDataURL(file);
+    }
+  };
 
   const handleConfirmTopup = async () => {
+    if (!receiptImage) {
+      haptics.error();
+      setErrorMsg('Por favor sube la fotografía del comprobante de transferencia bancaria.');
+      return;
+    }
+
+    setErrorMsg('');
     haptics.heavy();
     setIsProcessing(true);
 
     try {
       const newBalance = currentBalance + selectedAmount;
+      const ref = `COMPROBANTE-FOTO-${Date.now().toString().slice(-6)}`;
 
-      // Update in Firestore
+      // Update in Firestore y registrar en colección wallet_recharges
       if (user?.id) {
-        await apiService.topUpDriverWallet(user.id, selectedAmount, currentBalance);
+        await apiService.topUpDriverWallet(user.id, selectedAmount, currentBalance, ref);
       }
 
       // Update local state store
@@ -58,19 +113,13 @@ export const QrTopupModal = ({ isOpen, onClose, onSuccess }: QrTopupModalProps) 
 
       setTimeout(() => {
         setIsSuccess(false);
+        setReceiptImage(null);
         onClose();
       }, 2000);
     } catch (e) {
       console.error('Error procesando recarga QR:', e);
       setIsProcessing(false);
     }
-  };
-
-  const copyQrCodeString = () => {
-    haptics.selection();
-    navigator.clipboard.writeText(`00020101021226580014bo.gob.pagofacil0124RIBERGO-${driverId}-TOPUP${selectedAmount}5204599953030685404${selectedAmount}.005802BO5917RIBERGO BOLIVIA6009RIBERALTA6304C8A2`);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
   };
 
   return (
@@ -88,7 +137,7 @@ export const QrTopupModal = ({ isOpen, onClose, onSuccess }: QrTopupModalProps) 
               <div className="w-16 h-16 rounded-full bg-gold-primary/20 border-2 border-gold-primary text-gold-primary flex items-center justify-center mx-auto shadow-xl shadow-gold-primary/20 animate-bounce">
                 <CheckCircle2 className="w-10 h-10 stroke-[2.5]" />
               </div>
-              <h3 className="text-xl font-black text-white">¡Recarga Exitosa!</h3>
+              <h3 className="text-xl font-black text-white">¡Comprobante Enviado!</h3>
               <p className="text-xs text-text-secondary">
                 Se agregaron <span className="text-gold-primary font-bold">+{selectedAmount} BOB</span> a tu billetera RiberGO.
               </p>
@@ -103,23 +152,23 @@ export const QrTopupModal = ({ isOpen, onClose, onSuccess }: QrTopupModalProps) 
                 <label className="text-xs font-bold text-text-secondary uppercase tracking-wider">
                   1. Selecciona el monto a recargar
                 </label>
-                <div className="grid grid-cols-3 gap-2.5">
-                  {[20, 50, 100].map((amount) => (
+                <div className="grid grid-cols-4 gap-2">
+                  {[10, 20, 50, 100].map((amount) => (
                     <button
                       key={amount}
                       onClick={() => {
                         haptics.selection();
                         setSelectedAmount(amount);
                       }}
-                      className={`py-3 rounded-2xl border text-center font-black text-sm transition active:scale-95 flex flex-col items-center justify-center gap-0.5 ${
+                      className={`py-2.5 px-1 rounded-2xl border text-center font-black text-xs transition active:scale-95 flex flex-col items-center justify-center gap-0.5 ${
                         selectedAmount === amount
                           ? 'bg-gold-primary text-background border-gold-primary shadow-lg shadow-gold-primary/25'
                           : 'bg-surface-2 border-border-custom text-white hover:border-gold-primary/40'
                       }`}
                     >
-                      <span>{amount} BOB</span>
-                      <span className="text-[9px] font-bold opacity-80">
-                        {amount === 20 ? '20 carreras' : amount === 50 ? '50 carreras' : '100 carreras'}
+                      <span className="font-extrabold">{amount} Bs</span>
+                      <span className="text-[8px] font-bold opacity-80 leading-tight">
+                        {amount} viajes
                       </span>
                     </button>
                   ))}
@@ -138,10 +187,10 @@ export const QrTopupModal = ({ isOpen, onClose, onSuccess }: QrTopupModalProps) 
                   </span>
                 </div>
 
-                {/* Simulated High-Res Bolivia QR SVG */}
+                {/* High-Res Bolivia QR */}
                 <div className="w-44 h-44 mx-auto p-3 bg-white rounded-2xl shadow-xl border-4 border-gold-primary/60 flex items-center justify-center relative group">
                   <img
-                    src={`https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=RIBERGO-TOPUP-${selectedAmount}BOB-DRIVER-${driverId}&color=05080B`}
+                    src={qrUrl}
                     alt="QR Bolivia RiberGO"
                     className="w-full h-full object-contain"
                   />
@@ -153,17 +202,83 @@ export const QrTopupModal = ({ isOpen, onClose, onSuccess }: QrTopupModalProps) 
                 </div>
 
                 <p className="text-[11px] text-text-secondary leading-tight px-2">
-                  Abre la app de tu Banco Móvil (BNB, BCP, Banco Unión, Fie, etc.), escanea este QR y confirma.
+                  Descarga el QR en tu galería y ábrelo desde tu app bancaria (BNB, BCP, Banco Unión, Fie, etc.) para pagar.
                 </p>
 
+                {/* DESCARGAR / GUARDAR EN GALERÍA */}
                 <button
-                  onClick={copyQrCodeString}
-                  className="w-full py-2 rounded-xl bg-surface border border-border-custom text-[11px] font-semibold text-gold-light hover:text-white flex items-center justify-center gap-1.5 transition active:scale-95"
+                  type="button"
+                  onClick={handleDownloadQr}
+                  disabled={downloading}
+                  className="w-full py-2.5 rounded-xl bg-gold-primary/15 border border-gold-primary/40 text-xs font-bold text-gold-light hover:bg-gold-primary hover:text-background flex items-center justify-center gap-2 transition active:scale-95"
                 >
-                  {copied ? <Check className="w-3.5 h-3.5 text-gold-primary" /> : <Copy className="w-3.5 h-3.5" />}
-                  <span>{copied ? '¡Código Copiado!' : 'Copiar Código de Pago QR'}</span>
+                  <Download className={`w-4 h-4 ${downloading ? 'animate-bounce text-gold-primary' : ''}`} />
+                  <span>{downloading ? 'Guardando en galería...' : 'Descargar / Guardar en galería'}</span>
                 </button>
               </div>
+
+              {/* SUBIR COMPROBANTE DE PAGO */}
+              <div className="space-y-1.5">
+                <label className="text-[11px] font-bold text-text-secondary uppercase">
+                  2. Subir comprobante de pago
+                </label>
+
+                <input
+                  type="file"
+                  ref={fileInputRef}
+                  onChange={handleFileChange}
+                  accept="image/*"
+                  className="hidden"
+                />
+
+                {receiptImage ? (
+                  <div className="relative p-2.5 rounded-2xl bg-surface-2 border border-gold-primary/50 flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-3 overflow-hidden">
+                      <div className="w-12 h-12 rounded-xl bg-black border border-border-custom overflow-hidden shrink-0">
+                        <img
+                          src={receiptImage}
+                          alt="Comprobante"
+                          className="w-full h-full object-cover"
+                        />
+                      </div>
+                      <div className="text-left truncate">
+                        <p className="text-xs font-bold text-white flex items-center gap-1 truncate">
+                          <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                          <span>Comprobante listo</span>
+                        </p>
+                        <p className="text-[10px] text-text-secondary">Foto seleccionada</p>
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => setReceiptImage(null)}
+                      className="p-1.5 rounded-xl bg-surface hover:bg-rose-500/20 text-text-secondary hover:text-rose-400 transition"
+                      title="Quitar comprobante"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    className="w-full py-4 px-3 rounded-2xl bg-surface-2/80 hover:bg-surface border-2 border-dashed border-gold-primary/40 text-text-secondary hover:text-white flex flex-col items-center justify-center gap-1.5 transition active:scale-95 cursor-pointer"
+                  >
+                    <div className="w-10 h-10 rounded-xl bg-gold-primary/10 border border-gold-primary/30 flex items-center justify-center text-gold-primary">
+                      <Upload className="w-5 h-5" />
+                    </div>
+                    <span className="text-xs font-bold text-white">Subir fotografía del comprobante</span>
+                    <span className="text-[10px] text-text-secondary">Toca aquí para seleccionar desde tu galería</span>
+                  </button>
+                )}
+              </div>
+
+              {errorMsg && (
+                <div className="p-2.5 rounded-xl bg-rose-500/15 border border-rose-500/40 text-rose-300 text-xs">
+                  {errorMsg}
+                </div>
+              )}
 
               {/* ACTION CONFIRM BUTTON */}
               <button
@@ -174,12 +289,12 @@ export const QrTopupModal = ({ isOpen, onClose, onSuccess }: QrTopupModalProps) 
                 {isProcessing ? (
                   <>
                     <RefreshCw className="w-4 h-4 animate-spin" />
-                    <span>Acreditando Saldo...</span>
+                    <span>Subiendo comprobante...</span>
                   </>
                 ) : (
                   <>
                     <CheckCircle2 className="w-4 h-4 stroke-[2.5]" />
-                    <span>Confirmar Recarga de {selectedAmount} BOB</span>
+                    <span>Enviar Comprobante ({selectedAmount} BOB)</span>
                   </>
                 )}
               </button>

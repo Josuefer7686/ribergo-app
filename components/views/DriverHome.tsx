@@ -13,6 +13,7 @@ import { audio } from '@/utils/audio';
 import { apiService } from '@/services/apiService';
 import { DriverWalletTutorialModal } from '@/components/modals/DriverWalletTutorialModal';
 import { QrTopupModal } from '@/components/modals/QrTopupModal';
+import { NegotiationChatModal } from '@/components/modals/NegotiationChatModal';
 
 export const DriverHome = () => {
   const { 
@@ -21,7 +22,8 @@ export const DriverHome = () => {
     pendingRequest, setPendingRequest,
     activeTrip, setActiveTrip,
     setActiveTab, addTripToHistory, preferences,
-    setHasCompletedDriverTutorial, topUpWallet, deductWalletCommission
+    setHasCompletedDriverTutorial, topUpWallet, deductWalletCommission,
+    decrementFreeTrips
   } = useAppStore();
 
   const [countdown, setCountdown] = useState(15);
@@ -32,13 +34,14 @@ export const DriverHome = () => {
   const [lowBalanceBanner, setLowBalanceBanner] = useState(false);
 
   const isOnline = driverState !== 'OFFLINE';
-  const walletBalance = user?.walletBalance ?? 50.0;
+  const walletBalance = user?.walletBalance ?? 0.0;
+  const freeTrips = user?.freeTripsRemaining ?? 0;
 
   const driverId = user?.id || 'drv-' + (user?.phone?.replace(/[^0-9]/g, '') || 'demo');
   const driverName = user?.name || 'Carlos Mendoza';
   const driverPhone = user?.phone || '+591 76543210';
   const motorcycle = user?.motorcycle || 'Honda Wave 110';
-  const plate = user?.plate || 'RBT-482';
+  const plate = user?.plate || '';
 
   // Check if first-time driver tutorial needs to open automatically
   useEffect(() => {
@@ -72,14 +75,17 @@ export const DriverHome = () => {
     const loc = currentLocation || { lat: -11.0061, lng: -66.0747, name: 'Riberalta Centro' };
 
     if (nextOnlineState) {
-      // Check if driver has sufficient wallet balance to work
-      if (walletBalance <= 0) {
+      // Check if driver has sufficient wallet balance or free gift trips to work
+      if (walletBalance <= 0 && freeTrips <= 0) {
         haptics.error();
         setLowBalanceBanner(true);
         setShowQrModal(true);
         return;
       }
 
+      // Limpiar estados residuales previos para recibir solicitudes limpias
+      setActiveTrip(null);
+      setPendingRequest(null);
       setDriverState('ONLINE');
       await apiService.setDriverOnlineStatus(
         driverId, driverName, driverPhone, motorcycle, plate, 5.0, loc, true
@@ -93,23 +99,57 @@ export const DriverHome = () => {
     }
   };
 
-  // Subscribe to real-time pending ride requests in Firestore when ONLINE
+  // Subscribe to active trip updates (e.g. negotiation, payment, fare updates)
+  useEffect(() => {
+    if (!activeTrip?.id) return;
+    const unsubscribe = apiService.subscribeToRide(activeTrip.id, (rideData) => {
+      if (!rideData) return;
+
+      if (rideData.status === 'GOING_TO_PASSENGER' && driverState === 'NEGOTIATING') {
+        setDriverState('GOING_TO_PASSENGER');
+      }
+
+      if (rideData.status === 'SEARCHING_DRIVER' && driverState === 'NEGOTIATING') {
+        // Negotiation cancelled
+        setDriverState('ONLINE');
+        setActiveTrip(null);
+        return;
+      }
+
+      setActiveTrip({
+        ...(activeTrip || {}),
+        ...rideData,
+      });
+    });
+    return () => unsubscribe();
+  }, [activeTrip?.id, driverState, setDriverState, setActiveTrip]);
+
+  // Subscribe to real-time pending ride requests in Firestore & RealtimeSyncBus when ONLINE
   useEffect(() => {
     if (driverState !== 'ONLINE') return;
 
     const unsubscribe = apiService.subscribeToPendingRides((pendingRides) => {
-      if (pendingRides.length > 0 && !activeTrip) {
+      // Solo ignorar si el conductor ya tiene un viaje activo en curso
+      const isTripOngoing = activeTrip && (
+        activeTrip.status === 'NEGOTIATING' || 
+        activeTrip.status === 'GOING_TO_PASSENGER' || 
+        activeTrip.status === 'TRIP_STARTED'
+      );
+
+      if (pendingRides.length > 0 && !isTripOngoing && driverState === 'ONLINE') {
         const req = pendingRides[0];
         setPendingRequest({
           id: req.id,
           pickup: req.pickup,
           destination: req.destination,
-          price: req.price || 8,
+          price: req.price || 10,
           distanceKm: req.distanceKm || 2.5,
           durationMin: req.durationMin || 7,
           passengerName: req.passengerName || 'Pasajero RiberGO',
           passengerPhone: req.passengerPhone || '+591 70000000',
           passengerRating: 5.0,
+          paymentMethod: req.paymentMethod || 'CASH',
+          paymentStatus: req.paymentStatus || 'PENDING',
         });
         haptics.driverIncoming();
         audio.driverIncomingRequest();
@@ -119,7 +159,7 @@ export const DriverHome = () => {
     });
 
     return () => unsubscribe();
-  }, [driverState, activeTrip, setPendingRequest, setDriverState]);
+  }, [driverState, activeTrip?.status, setPendingRequest, setDriverState]);
 
   // Request countdown timer with sound & haptic alerts
   useEffect(() => {
@@ -168,9 +208,11 @@ export const DriverHome = () => {
       await apiService.acceptRide(pendingRequest.id, driverData);
       setActiveTrip({
         ...pendingRequest,
+        status: 'NEGOTIATING',
         driver: driverData,
       });
-      setDriverState('GOING_TO_PASSENGER');
+      setPendingRequest(null);
+      setDriverState('NEGOTIATING');
     }
   };
 
@@ -185,6 +227,19 @@ export const DriverHome = () => {
     setDriverState('TRIP_STARTED');
     if (activeTrip?.id) {
       await apiService.updateRideStatus(activeTrip.id, 'TRIP_STARTED');
+    }
+  };
+
+  // Driver approves QR payment receipt
+  const handleApproveQrPayment = async () => {
+    haptics.success();
+    audio.driverTripAccepted();
+    if (activeTrip?.id) {
+      await apiService.confirmRideQrPayment(activeTrip.id);
+      setActiveTrip({
+        ...activeTrip,
+        paymentStatus: 'CONFIRMED',
+      });
     }
   };
 
@@ -209,21 +264,31 @@ export const DriverHome = () => {
       });
     }
 
-    // Deduct 1 BOB commission from driver wallet
-    deductWalletCommission(1.0);
-    if (user?.id) {
-      await apiService.deductTripCommission(user.id, walletBalance, 1.0);
-    }
-
-    // If new balance will be 0 or less, notify driver
-    if (walletBalance - 1.0 <= 0) {
-      setDriverState('OFFLINE');
-      setLowBalanceBanner(true);
-      setShowQrModal(true);
+    // Commission logic: Check if driver has gift free trips remaining
+    if (freeTrips > 0) {
+      decrementFreeTrips();
+      if (user?.id) {
+        await apiService.decrementDriverFreeTrips(user.id, freeTrips);
+      }
     } else {
-      setDriverState('ONLINE');
+      // Deduct 1 BOB commission from driver wallet
+      deductWalletCommission(1.0);
+      if (user?.id) {
+        await apiService.deductTripCommission(user.id, walletBalance, 1.0);
+      }
+
+      // If new balance will be 0 or less, notify driver
+      if (walletBalance - 1.0 <= 0) {
+        setDriverState('OFFLINE');
+        setLowBalanceBanner(true);
+        setShowQrModal(true);
+        setActiveTrip(null);
+        setPendingRequest(null);
+        return;
+      }
     }
 
+    setDriverState('ONLINE');
     setActiveTrip(null);
     setPendingRequest(null);
   };
@@ -246,6 +311,14 @@ export const DriverHome = () => {
           </div>
 
           <div className="flex items-center gap-2">
+            {/* Free Trips Gift Badge */}
+            {freeTrips > 0 && (
+              <div className="px-2.5 py-1.5 rounded-2xl bg-gradient-to-r from-amber-500/20 to-yellow-500/20 border border-gold-primary text-gold-primary backdrop-blur-md text-xs font-black flex items-center gap-1 shadow-lg animate-pulse">
+                <Bike className="w-3.5 h-3.5" />
+                <span>{freeTrips} gratis</span>
+              </div>
+            )}
+
             {/* Quick Wallet Balance Pill */}
             <button
               onClick={() => setActiveTab('INCOME')}
@@ -270,8 +343,8 @@ export const DriverHome = () => {
           </div>
         </div>
 
-        {/* Low balance warning floating banner */}
-        {lowBalanceBanner && walletBalance <= 0 && (
+        {/* Low balance warning floating banner (solo si no tiene saldo Y tampoco tiene viajes gratis) */}
+        {lowBalanceBanner && walletBalance <= 0 && freeTrips <= 0 && (
           <div className="pointer-events-auto max-w-[430px] mx-auto p-3 rounded-2xl bg-rose-500/90 text-white text-xs font-semibold flex items-center justify-between shadow-xl backdrop-blur-md animate-bounce">
             <div className="flex items-center gap-2">
               <AlertCircle className="w-4 h-4 shrink-0" />
@@ -305,7 +378,9 @@ export const DriverHome = () => {
               <div>
                 <h3 className="text-base font-bold text-white">Estás fuera de línea</h3>
                 <p className="text-xs text-text-secondary mt-0.5">
-                  {walletBalance <= 0 
+                  {freeTrips > 0 
+                    ? `¡Tienes ${freeTrips} viajes gratis de bienvenida sin comisión!`
+                    : walletBalance <= 0 
                     ? 'Recarga tu saldo para volver a conectarte.' 
                     : 'Conéctate para recibir solicitudes de mototaxi en Riberalta.'}
                 </p>
@@ -314,7 +389,7 @@ export const DriverHome = () => {
                 onClick={toggleOnline}
                 className="w-full py-3.5 bg-gold-primary hover:bg-gold-light text-background rounded-2xl font-black text-sm shadow-xl shadow-gold-primary/20 transition active:scale-95"
               >
-                {walletBalance <= 0 ? 'RECARGAR Y CONECTARME' : 'PONERME EN LÍNEA'}
+                {freeTrips > 0 || walletBalance > 0 ? 'PONERME EN LÍNEA' : 'RECARGAR Y CONECTARME'}
               </button>
             </motion.div>
           )}
@@ -362,7 +437,14 @@ export const DriverHome = () => {
                   <span className="w-2 h-2 rounded-full bg-gold-primary animate-ping" />
                   Nueva Solicitud ({countdown}s)
                 </span>
-                <span className="text-xl font-black text-gold-primary">{pendingRequest.price} BOB</span>
+                <div className="text-right">
+                  <span className="text-xl font-black text-gold-primary">{pendingRequest.price} BOB</span>
+                  {pendingRequest.price > 10 && (
+                    <span className="block text-[9px] font-black text-amber-400 uppercase tracking-wider">
+                      ⚡ ¡Oferta atractiva!
+                    </span>
+                  )}
+                </div>
               </div>
 
               {/* Passenger & Trip Info */}
@@ -468,6 +550,49 @@ export const DriverHome = () => {
                 <p className="text-text-secondary">Pasajero: <span className="text-white font-semibold">{activeTrip.passengerName}</span></p>
               </div>
 
+              {/* QR PAYMENT VERIFICATION CARD (IF PASSENGER SELECTED QR) */}
+              {activeTrip.paymentMethod === 'QR' && (
+                <div className="p-3.5 rounded-2xl bg-surface border border-gold-primary/30 space-y-2.5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-white flex items-center gap-1.5">
+                      <QrCode className="w-4 h-4 text-gold-primary" />
+                      Pago por QR ({activeTrip.price} BOB)
+                    </span>
+                    {activeTrip.paymentStatus === 'CONFIRMED' ? (
+                      <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 text-[10px] font-bold">
+                        Aprobado ✓
+                      </span>
+                    ) : activeTrip.paymentStatus === 'WAITING_DRIVER_CONFIRM' ? (
+                      <span className="px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 text-[10px] font-bold animate-pulse">
+                        ¡Pasajero ya transfirió!
+                      </span>
+                    ) : (
+                      <span className="px-2 py-0.5 rounded-full bg-surface-2 text-text-secondary text-[10px] font-medium">
+                        Pendiente
+                      </span>
+                    )}
+                  </div>
+
+                  <p className="text-[11px] text-text-secondary leading-snug">
+                    {activeTrip.paymentStatus === 'CONFIRMED'
+                      ? 'Confirmaste la recepción del pago en tu cuenta bancaria.'
+                      : activeTrip.paymentStatus === 'WAITING_DRIVER_CONFIRM'
+                      ? 'El pasajero indica que ya te envió el dinero. Verifica en tu app del banco y pulsa aprobar:'
+                      : 'El pasajero escaneará tu QR al llegar. Espera su transferencia.'}
+                  </p>
+
+                  {activeTrip.paymentStatus !== 'CONFIRMED' && (
+                    <button
+                      onClick={handleApproveQrPayment}
+                      className="w-full py-2.5 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-white rounded-xl font-black text-xs uppercase tracking-wider flex items-center justify-center gap-1.5 shadow-md shadow-emerald-500/20 active:scale-95 transition"
+                    >
+                      <Check className="w-4 h-4 stroke-[3]" />
+                      <span>Aprobar Pago QR Recibido</span>
+                    </button>
+                  )}
+                </div>
+              )}
+
               <div className="grid grid-cols-2 gap-3">
                 <button
                   onClick={() => setActiveTab('MESSAGES')}
@@ -500,6 +625,9 @@ export const DriverHome = () => {
         onClose={() => setShowQrModal(false)}
         onSuccess={handleTopupSuccess}
       />
+
+      {/* NEGOTIATION CHAT MODAL */}
+      <NegotiationChatModal />
     </div>
   );
 };
