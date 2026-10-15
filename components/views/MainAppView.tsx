@@ -16,7 +16,7 @@ import { useAutoLocation } from '@/hooks/useAutoLocation';
 import { apiService } from '@/services/apiService';
 
 export function MainAppView() {
-  const { role, activeTab, setActiveTab, activeTrip, assignedDriver } = useAppStore();
+  const { role, activeTab, setActiveTab, activeTrip, assignedDriver, passengerState, driverState } = useAppStore();
   const [activeToast, setActiveToast] = useState<ToastMessageData | null>(null);
   const lastProcessedMsgId = useRef<string | null>(null);
 
@@ -24,6 +24,14 @@ export function MainAppView() {
   const { isRequesting, locationError, showPermissionModal, requestLocation } = useAutoLocation();
 
   const rideId = activeTrip?.id;
+
+  // Determine if the user is currently inside any chat interface (Messages tab or Negotiation modal)
+  const isInsideChat = 
+    activeTab === 'MESSAGES' || 
+    (role === 'PASSENGER' && passengerState === 'NEGOTIATING') || 
+    (role === 'DRIVER' && driverState === 'NEGOTIATING');
+
+  // Toast is suppressed when user is inside any chat interface
 
   // Real-time listener for incoming messages to show iOS 18 Dynamic Island banner
   useEffect(() => {
@@ -38,8 +46,8 @@ export function MainAppView() {
       if (isFromOtherUser && latestMsg.id !== lastProcessedMsgId.current) {
         lastProcessedMsgId.current = latestMsg.id;
 
-        // If user is currently NOT on MESSAGES tab, show the floating iOS 18 banner
-        if (activeTab !== 'MESSAGES') {
+        // If user is currently NOT inside any chat, show the floating iOS 18 banner
+        if (!isInsideChat) {
           setActiveToast({
             id: latestMsg.id,
             senderName: role === 'PASSENGER' ? (assignedDriver?.name || activeTrip?.driver?.name || 'Mototaxista RiberGO') : (activeTrip?.passengerName || 'Pasajero RiberGO'),
@@ -52,7 +60,7 @@ export function MainAppView() {
     });
 
     return () => unsubscribe();
-  }, [rideId, role, activeTab, assignedDriver, activeTrip]);
+  }, [rideId, role, isInsideChat, assignedDriver, activeTrip]);
 
   const renderContent = () => {
     switch (activeTab) {
@@ -78,7 +86,7 @@ export function MainAppView() {
 
       {/* Floating iOS 18 Dynamic Island Message Toast Banner */}
       <IosMessageToast
-        toast={activeToast}
+        toast={isInsideChat ? null : activeToast}
         onClose={() => setActiveToast(null)}
         onOpenChat={() => setActiveTab('MESSAGES')}
       />

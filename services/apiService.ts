@@ -624,7 +624,7 @@ export const apiService = {
 
 
   /**
-   * Create a new mototaxi ride request in Cloud Firestore & RealtimeSyncBus
+   * Create a new mototaxi ride request in Cloud Firestore 'active_requests' & RealtimeSyncBus
    */
   async requestRide(
     pickup: LocationPoint, 
@@ -648,6 +648,7 @@ export const apiService = {
       passengerName,
       paymentMethod,
       paymentStatus: 'PENDING',
+      status: 'SEARCHING_DRIVER',
     };
 
     // 1. Guardar y emitir inmediatamente en RealtimeSyncBus (0ms de latencia)
@@ -657,17 +658,21 @@ export const apiService = {
       createdAtMs: nowMs,
     });
 
-    // 2. Persistir en Firestore de fondo si está configurado
+    // 2. Persistir en la colección efímera 'active_requests' en Cloud Firestore
     if (isFirebaseConfigured()) {
       try {
-        setDoc(doc(db, 'rides', rideId), {
+        const payload = {
           ...tripData,
           status: 'SEARCHING_DRIVER',
           createdAtMs: nowMs,
           createdAt: serverTimestamp(),
-        }).catch((err) => {
-          console.warn('Firestore setDoc background error:', err?.message || err);
+        };
+        // Guardar en active_requests (cola en vivo)
+        setDoc(doc(db, 'active_requests', rideId), payload).catch((err) => {
+          console.warn('Firestore active_requests setDoc background error:', err?.message || err);
         });
+        // Y en rides por respaldo
+        setDoc(doc(db, 'rides', rideId), payload).catch(() => {});
       } catch (err) {
         console.warn('Firestore Request Ride Error:', err);
       }
@@ -677,7 +682,54 @@ export const apiService = {
   },
 
   /**
-   * Listen to real-time updates for a specific ride (híbrido RealtimeSyncBus + Firestore)
+   * Cancel and AUTODESTROY a ride request completely from active_requests
+   * (No deja rastros ni viajes fantasmas en la base de datos)
+   */
+  async cancelRideRequest(rideId: string) {
+    if (!rideId) return;
+
+    // 1. Autodestruir de la memoria local y emitir evento inmediatamente (0ms)
+    realtimeSyncBus.removeRide(rideId);
+
+    // 2. Autodestruir físicamente el documento en Cloud Firestore
+    if (isFirebaseConfigured()) {
+      try {
+        const { deleteDoc } = await import('firebase/firestore');
+        await deleteDoc(doc(db, 'active_requests', rideId)).catch(() => {});
+        await deleteDoc(doc(db, 'rides', rideId)).catch(() => {});
+      } catch (err) {
+        console.warn('Firestore autodestroy error:', err);
+      }
+    }
+  },
+
+  /**
+   * Complete trip, save permanent forensic record to 'trips_history' and AUTODESTROY from active_requests
+   */
+  async finishTripAndArchive(rideId: string, tripSummary: any) {
+    if (!rideId) return;
+
+    // 1. Guardar en el historial permanente inmutable de seguridad
+    if (isFirebaseConfigured()) {
+      try {
+        await setDoc(doc(db, 'trips_history', rideId), {
+          id: rideId,
+          ...tripSummary,
+          status: 'COMPLETED',
+          completedAtMs: Date.now(),
+          completedAt: serverTimestamp(),
+        });
+      } catch (err) {
+        console.warn('Error saving to trips_history:', err);
+      }
+    }
+
+    // 2. Autodestruir de la cola en vivo 'active_requests'
+    await this.cancelRideRequest(rideId);
+  },
+
+  /**
+   * Listen to real-time updates for a specific ride (active_requests + bus)
    */
   subscribeToRide(rideId: string, callback: (ride: any) => void) {
     // 1. Suscribirse inmediatamente a RealtimeSyncBus
@@ -688,16 +740,19 @@ export const apiService = {
     if (isFirebaseConfigured()) {
       try {
         unsubFirestore = onSnapshot(
-          doc(db, 'rides', rideId),
+          doc(db, 'active_requests', rideId),
           (snapshot) => {
             if (snapshot.exists()) {
               const data = snapshot.data();
               realtimeSyncBus.saveRide(data);
               callback(data);
+            } else {
+              // Si el documento fue eliminado (autodestruido por cancelación o finalización)
+              callback({ id: rideId, status: 'CANCELLED' });
             }
           },
           (err) => {
-            console.warn('Firestore ride listener permission error:', err?.message || err);
+            console.warn('Firestore active_requests ride listener error:', err?.message || err);
           }
         );
       } catch (e) {
@@ -712,7 +767,7 @@ export const apiService = {
   },
 
   /**
-   * Listen to pending ride requests for online drivers (en tiempo real)
+   * Listen to pending ride requests for online drivers (Escucha directa a active_requests en tiempo real)
    */
   subscribeToPendingRides(callback: (rides: any[]) => void) {
     // 1. Suscribirse inmediatamente a RealtimeSyncBus (0ms)
@@ -720,16 +775,12 @@ export const apiService = {
       callback(busPending);
     });
 
-    // 2. Suscribirse también a Firestore si está disponible
+    // 2. Suscribirse a la colección efímera 'active_requests' en Firestore
     let unsubFirestore = () => {};
     if (isFirebaseConfigured()) {
       try {
-        const q = query(
-          collection(db, 'rides'), 
-          where('status', '==', 'SEARCHING_DRIVER')
-        );
         unsubFirestore = onSnapshot(
-          q,
+          collection(db, 'active_requests'),
           (snapshot) => {
             const freshPendingRides = snapshot.docs
               .map(docSnap => ({
@@ -737,9 +788,10 @@ export const apiService = {
                 ...docSnap.data()
               } as any))
               .filter(r => {
+                // Solo solicitudes buscando conductor y sin chofer asignado
                 if (r.status !== 'SEARCHING_DRIVER') return false;
                 if (r.driverId) return false;
-                // Filtrar solo viajes recientes (menos de 5 minutos)
+                // Descartar si tuviera más de 5 minutos
                 const age = Date.now() - (r.createdAtMs || 0);
                 if (r.createdAtMs && age > 5 * 60 * 1000) return false;
                 return true;
@@ -750,17 +802,16 @@ export const apiService = {
                 return timeB - timeA;
               });
 
-            // Sincronizar hacia RealtimeSyncBus
+            // Sincronizar hacia RealtimeSyncBus y notificar choferes
             freshPendingRides.forEach(r => realtimeSyncBus.saveRide(r));
-            callback(realtimeSyncBus.getPendingRides());
+            callback(freshPendingRides);
           },
           (err) => {
-            console.warn('Firestore pending rides listener permission error (usando bus local):', err?.message || err);
-            // El bus local ya proveyó los datos
+            console.warn('Firestore active_requests listener notice (usando bus local):', err?.message || err);
           }
         );
       } catch (e) {
-        console.warn('Firestore query error:', e);
+        console.warn('Firestore active_requests query error:', e);
       }
     }
 
@@ -789,10 +840,10 @@ export const apiService = {
     // 1. Notificar inmediatamente al bus (0ms)
     realtimeSyncBus.saveRide(updatePayload);
 
-    // 2. Persistir en Firestore de fondo
+    // 2. Persistir en Firestore de fondo en active_requests y rides
     if (isFirebaseConfigured()) {
       try {
-        await updateDoc(doc(db, 'rides', rideId), {
+        const updateData = {
           status: 'NEGOTIATING',
           driverId: driver.id,
           driverName: driver.name,
@@ -801,7 +852,9 @@ export const apiService = {
           motorcycle: driver.motorcycle,
           plate: driver.plate,
           acceptedAt: serverTimestamp(),
-        });
+        };
+        await updateDoc(doc(db, 'active_requests', rideId), updateData).catch(() => {});
+        await updateDoc(doc(db, 'rides', rideId), updateData).catch(() => {});
       } catch (err) {
         console.warn('Firestore Accept Ride Error:', err);
       }
@@ -839,7 +892,8 @@ export const apiService = {
         if (destinationName) {
           updateData['destination.name'] = destinationName;
         }
-        await updateDoc(doc(db, 'rides', rideId), updateData);
+        await updateDoc(doc(db, 'active_requests', rideId), updateData).catch(() => {});
+        await updateDoc(doc(db, 'rides', rideId), updateData).catch(() => {});
       } catch (err) {
         console.warn('Firestore Propose Fare Error:', err);
       }
@@ -881,7 +935,8 @@ export const apiService = {
         if (finalDestination) {
           updateData['destination.name'] = finalDestination;
         }
-        await updateDoc(doc(db, 'rides', rideId), updateData);
+        await updateDoc(doc(db, 'active_requests', rideId), updateData).catch(() => {});
+        await updateDoc(doc(db, 'rides', rideId), updateData).catch(() => {});
       } catch (err) {
         console.warn('Firestore Confirm Fare Error:', err);
       }
@@ -889,37 +944,48 @@ export const apiService = {
   },
 
   /**
-   * Cancel negotiation and release ride back to searching
+   * Cancel negotiation and autodestroy the active request
    */
   async cancelRideNegotiation(rideId: string) {
+    await this.cancelRideRequest(rideId);
+  },
+
+  /**
+   * Release negotiation: driver rejects or passenger wants another driver.
+   * Keeps active_requests document alive in 'SEARCHING_DRIVER' status so other drivers can take it.
+   */
+  async releaseRideNegotiation(rideId: string) {
     const current = realtimeSyncBus.getRide(rideId) || {};
-    const updated: any = {
+    const updated = {
       ...current,
       id: rideId,
       status: 'SEARCHING_DRIVER',
+      driverId: null,
+      driverName: null,
+      driverPhone: null,
+      driverRating: null,
+      motorcycle: null,
+      plate: null,
+      updatedAtMs: Date.now(),
     };
-    delete updated.driverId;
-    delete updated.driverName;
-    delete updated.driverPhone;
-    delete updated.proposedPrice;
-    delete updated.priceOfferedBy;
-
     realtimeSyncBus.saveRide(updated);
 
     if (isFirebaseConfigured()) {
       try {
-        const { deleteField } = await import('firebase/firestore');
-        await updateDoc(doc(db, 'rides', rideId), {
+        const updateData: any = {
           status: 'SEARCHING_DRIVER',
-          driverId: deleteField(),
-          driverName: deleteField(),
-          driverPhone: deleteField(),
-          proposedPrice: deleteField(),
-          priceOfferedBy: deleteField(),
+          driverId: null,
+          driverName: null,
+          driverPhone: null,
+          driverRating: null,
+          motorcycle: null,
+          plate: null,
           updatedAt: serverTimestamp(),
-        });
+        };
+        await updateDoc(doc(db, 'active_requests', rideId), updateData).catch(() => {});
+        await updateDoc(doc(db, 'rides', rideId), updateData).catch(() => {});
       } catch (err) {
-        console.warn('Firestore Cancel Negotiation Error:', err);
+        console.warn('Firestore releaseRideNegotiation error:', err);
       }
     }
   },
@@ -939,10 +1005,14 @@ export const apiService = {
 
     if (isFirebaseConfigured()) {
       try {
+        await updateDoc(doc(db, 'active_requests', rideId), {
+          status,
+          updatedAt: serverTimestamp(),
+        }).catch(() => {});
         await updateDoc(doc(db, 'rides', rideId), {
           status,
           updatedAt: serverTimestamp(),
-        });
+        }).catch(() => {});
       } catch (err) {
         console.warn('Firestore Update Ride Status Error:', err);
       }

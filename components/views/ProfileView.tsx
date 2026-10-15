@@ -13,7 +13,7 @@ import { audio } from '@/utils/audio';
 import { notifications } from '@/utils/notifications';
 
 export const ProfileView = () => {
-  const { user, role, logout, preferences, setPaymentMethod, toggleNotification, toggleSetting, setShowPwaModal } = useAppStore();
+  const { user, role, setRole, setCurrentView, logout, preferences, setPaymentMethod, toggleNotification, toggleSetting, setShowPwaModal } = useAppStore();
   const [notifPermission, setNotifPermission] = useState<string>(() => notifications.getPermission());
   const [isStandalone] = useState<boolean>(() => {
     if (typeof window === 'undefined') return false;
@@ -75,6 +75,33 @@ export const ProfileView = () => {
           </div>
         </div>
 
+        {/* MODO SWITCHER (CAMBIAR ENTRE PASAJERO Y CONDUCTOR) */}
+        <div className="p-3.5 rounded-2xl bg-surface border border-gold-primary/30 flex items-center justify-between shadow-lg">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-gold-primary/10 border border-gold-primary/30 flex items-center justify-center text-gold-primary">
+              {isPassenger ? <Bike className="w-5 h-5" /> : <User className="w-5 h-5" />}
+            </div>
+            <div>
+              <p className="text-xs font-bold text-white">
+                {isPassenger ? 'Cambiar a Modo Conductor' : 'Cambiar a Modo Pasajero'}
+              </p>
+              <p className="text-[10px] text-text-secondary">
+                {isPassenger ? 'Genera ingresos en tu mototaxi' : 'Pide mototaxis por Riberalta'}
+              </p>
+            </div>
+          </div>
+
+          <button
+            onClick={() => {
+              haptics.heavy();
+              setCurrentView('ROLE_SELECTION');
+            }}
+            className="px-3 py-1.5 rounded-xl bg-gold-primary text-background font-black text-xs hover:bg-gold-light transition shadow-md shadow-gold-primary/20 active:scale-95 whitespace-nowrap"
+          >
+            Cambiar
+          </button>
+        </div>
+
         {/* DRIVER REGISTRATION / SECURITY INFO BANNER (SOLO PARA PASAJEROS) */}
         {isPassenger && (
           <div className="p-4 rounded-2xl bg-surface-2 border border-gold-primary/30 flex items-center justify-between">
@@ -134,8 +161,8 @@ export const ProfileView = () => {
         <div className="p-4 rounded-3xl bg-surface border border-gold-primary/40 shadow-xl space-y-3">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-2xl bg-gold-primary/10 border border-gold-primary/30 flex items-center justify-center text-gold-primary">
-                <Smartphone className="w-5 h-5" />
+              <div className="w-10 h-10 rounded-2xl bg-gold-primary/10 border border-gold-primary/30 flex items-center justify-center shrink-0 overflow-hidden p-1 shadow-md">
+                <img src="/logo.png" alt="RiberGO Logo" className="w-full h-full object-contain rounded-xl" />
               </div>
               <div>
                 <h4 className="text-xs font-bold text-white">Estado de la Aplicación</h4>
@@ -261,7 +288,8 @@ export const ProfileView = () => {
           <span>Cerrar sesión</span>
         </button>
 
-        <div className="text-center text-[10px] text-text-secondary pb-4">
+        <div className="flex flex-col items-center justify-center gap-1.5 text-[10px] text-text-secondary pb-4">
+          <img src="/logo.png" alt="RiberGO Logo" className="w-5 h-5 rounded-md object-contain opacity-80" />
           <span>RiberGO PWA v2.0 • Riberalta, Bolivia</span>
         </div>
       </div>

@@ -16,11 +16,23 @@ import { SmartPwaInstallModal } from '@/components/modals/SmartPwaInstallModal';
 export default function App() {
   const { currentView, setCurrentView, user, loginUser } = useAppStore();
 
-  // Register Service Worker so Chrome recognises this as an installable PWA
+  // Register Service Worker and actively check for updates to refresh installed PWAs
   useEffect(() => {
     if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('/sw.js').catch((err) => {
+      navigator.serviceWorker.register('/sw.js').then((registration) => {
+        // Trigger active update check immediately upon opening the app
+        registration.update();
+      }).catch((err) => {
         console.warn('SW registration failed:', err);
+      });
+
+      // When the new Service Worker activates and claims control, reload to show new logo & code
+      let refreshing = false;
+      navigator.serviceWorker.addEventListener('controllerchange', () => {
+        if (!refreshing) {
+          refreshing = true;
+          window.location.reload();
+        }
       });
     }
   }, []);
@@ -35,7 +47,12 @@ export default function App() {
           const userDoc = await getDoc(doc(db, 'users', firebaseUser.uid));
           if (userDoc.exists()) {
             const profileData = userDoc.data() as any;
-            loginUser(profileData);
+            // Solo auto-iniciar en arranque en frío (SPLASH). Si el usuario está iniciando sesión con Google en LOGIN/REGISTER,
+            // permitimos que el flujo interactivo muestre la selección de rol (Pasajero / Conductor)
+            const current = useAppStore.getState().currentView;
+            if (current === 'SPLASH') {
+              loginUser(profileData);
+            }
           }
         } catch (e) {
           console.warn('Error rehydrating Firebase session:', e);

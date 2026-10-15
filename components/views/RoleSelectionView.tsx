@@ -79,7 +79,15 @@ export const RoleSelectionView = () => {
       <div className="pt-safe flex-1 flex flex-col justify-center max-w-sm mx-auto w-full">
         {!showDriverSetup ? (
           <>
-            <div className="text-center mb-8">
+            <div className="text-center mb-6">
+              <div className="relative inline-flex items-center justify-center mb-3">
+                <div className="absolute inset-0 rounded-2xl bg-gold-primary/25 blur-lg" />
+                <img
+                  src="/logo.png"
+                  alt="RiberGO Logo"
+                  className="w-16 h-16 object-contain rounded-2xl shadow-xl shadow-gold-primary/10 relative z-10 border border-gold-primary/30"
+                />
+              </div>
               <h2 className="text-2xl font-bold tracking-tight mb-2">
                 ¿Cómo quieres usar <span className="text-white">Riber</span><span className="text-gold-primary">GO</span>?
               </h2>

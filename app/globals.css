@@ -22,6 +22,12 @@ body {
   overscroll-behavior-y: none;
 }
 
+/* Ensure inputs allow text selection and proper caret positioning on iOS/Android */
+input, textarea {
+  user-select: text !important;
+  -webkit-user-select: text !important;
+}
+
 /* Glassmorphism */
 .glass-panel {
   background: rgba(11, 17, 22, 0.85);

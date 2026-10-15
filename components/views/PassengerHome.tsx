@@ -220,7 +220,20 @@ export const PassengerHome = () => {
     haptics.success();
     audio.passengerTripFinished();
     if (activeTrip?.id) {
-      await apiService.updateRideStatus(activeTrip.id, 'COMPLETED');
+      await apiService.finishTripAndArchive(activeTrip.id, {
+        passengerId: user?.id || 'passenger_demo',
+        passengerName: user?.name || 'Pasajero',
+        passengerPhone: user?.phone || '',
+        driverId: assignedDriver?.id || activeTrip.driver?.id || '',
+        driverName: assignedDriver?.name || activeTrip.driver?.name || 'Conductor',
+        driverPhone: assignedDriver?.phone || '',
+        vehicle: assignedDriver?.motorcycle || '',
+        price: activeTrip.price || 10,
+        pickup: currentLocation?.name || 'Mi Ubicación',
+        destination: destination?.name || 'Destino',
+        status: 'COMPLETED',
+        rating: rating,
+      });
     }
     if (activeTrip && assignedDriver) {
       addTripToHistory({
@@ -294,8 +307,12 @@ export const PassengerHome = () => {
       {/* Top Floating Header Branding, Mode Switcher & Location Alert */}
       <div className="relative z-10 pt-safe px-4 pt-4 pointer-events-none space-y-2.5 max-w-sm mx-auto w-full">
         <div className="flex items-center justify-between pointer-events-auto">
-          <div className="flex items-center gap-2.5 px-3.5 py-2 rounded-2xl bg-surface/90 border border-border-custom backdrop-blur-md shadow-lg">
-            <div className="w-2.5 h-2.5 rounded-full bg-gold-primary animate-pulse" />
+          <div className="flex items-center gap-2 px-3 py-1.5 rounded-2xl bg-surface/90 border border-gold-primary/30 backdrop-blur-md shadow-lg">
+            <img
+              src="/logo.png"
+              alt="RiberGO Logo"
+              className="w-5 h-5 object-contain rounded-md"
+            />
             <span className="text-sm font-black tracking-tight">
               <span className="text-white">Riber</span>
               <span className="text-gold-primary">GO</span>
@@ -490,7 +507,7 @@ export const PassengerHome = () => {
                 onClick={async () => {
                   haptics.selection();
                   if (activeTrip?.id) {
-                    await apiService.cancelRideNegotiation(activeTrip.id);
+                    await apiService.cancelRideRequest(activeTrip.id);
                   }
                   setActiveTrip(null);
                   setPassengerState('IDLE');

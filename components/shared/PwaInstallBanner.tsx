@@ -44,8 +44,8 @@ export const PwaInstallBanner = () => {
         className="p-4 rounded-2xl bg-surface border border-gold-primary/40 shadow-xl flex items-center justify-between gap-3 text-xs"
       >
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-gold-primary/20 border border-gold-primary/40 flex items-center justify-center text-gold-primary shrink-0">
-            <Smartphone className="w-5 h-5" />
+          <div className="w-10 h-10 rounded-xl bg-gold-primary/10 border border-gold-primary/40 flex items-center justify-center shrink-0 overflow-hidden p-1 shadow-md">
+            <img src="/logo.png" alt="RiberGO Logo" className="w-full h-full object-contain rounded-lg" />
           </div>
           <div>
             <h4 className="font-bold text-white">Instala RiberGO</h4>

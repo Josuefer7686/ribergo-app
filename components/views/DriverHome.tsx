@@ -99,18 +99,27 @@ export const DriverHome = () => {
     }
   };
 
-  // Subscribe to active trip updates (e.g. negotiation, payment, fare updates)
+  // Subscribe to active trip updates (e.g. negotiation, payment, fare updates, or cancellation)
   useEffect(() => {
     if (!activeTrip?.id) return;
     const unsubscribe = apiService.subscribeToRide(activeTrip.id, (rideData) => {
       if (!rideData) return;
+
+      // Si el viaje fue cancelado o autodestruido de active_requests
+      if (rideData.status === 'CANCELLED') {
+        haptics.error();
+        setDriverState('ONLINE');
+        setActiveTrip(null);
+        setPendingRequest(null);
+        return;
+      }
 
       if (rideData.status === 'GOING_TO_PASSENGER' && driverState === 'NEGOTIATING') {
         setDriverState('GOING_TO_PASSENGER');
       }
 
       if (rideData.status === 'SEARCHING_DRIVER' && driverState === 'NEGOTIATING') {
-        // Negotiation cancelled
+        // Negotiation cancelled / released
         setDriverState('ONLINE');
         setActiveTrip(null);
         return;
@@ -124,11 +133,22 @@ export const DriverHome = () => {
     return () => unsubscribe();
   }, [activeTrip?.id, driverState, setDriverState, setActiveTrip]);
 
-  // Subscribe to real-time pending ride requests in Firestore & RealtimeSyncBus when ONLINE
+  // Subscribe to real-time pending ride requests in Firestore & RealtimeSyncBus when ONLINE or viewing RIDE_REQUEST
   useEffect(() => {
-    if (driverState !== 'ONLINE') return;
+    if (driverState !== 'ONLINE' && driverState !== 'RIDE_REQUEST') return;
 
     const unsubscribe = apiService.subscribeToPendingRides((pendingRides) => {
+      // Si el chofer está en la tarjeta de solicitud entrante pero el pasajero canceló la búsqueda (autodestrucción en Firestore)
+      if (driverState === 'RIDE_REQUEST') {
+        const stillPending = pendingRides.some((r) => r.id === pendingRequest?.id);
+        if (!stillPending) {
+          // Solicitud esfumada inmediatamente
+          setPendingRequest(null);
+          setDriverState('ONLINE');
+        }
+        return;
+      }
+
       // Solo ignorar si el conductor ya tiene un viaje activo en curso
       const isTripOngoing = activeTrip && (
         activeTrip.status === 'NEGOTIATING' || 
@@ -159,7 +179,7 @@ export const DriverHome = () => {
     });
 
     return () => unsubscribe();
-  }, [driverState, activeTrip?.status, setPendingRequest, setDriverState]);
+  }, [driverState, activeTrip?.status, pendingRequest?.id, setPendingRequest, setDriverState]);
 
   // Request countdown timer with sound & haptic alerts
   useEffect(() => {
@@ -246,7 +266,20 @@ export const DriverHome = () => {
   const handleFinishDriverTrip = async () => {
     haptics.success();
     if (activeTrip?.id) {
-      await apiService.updateRideStatus(activeTrip.id, 'COMPLETED');
+      await apiService.finishTripAndArchive(activeTrip.id, {
+        passengerId: (activeTrip as any).passengerId || '',
+        passengerName: activeTrip.passengerName || 'Pasajero',
+        passengerPhone: activeTrip.passengerPhone || '',
+        driverId: driverId,
+        driverName: driverName,
+        driverPhone: driverPhone,
+        vehicle: motorcycle,
+        price: activeTrip.price || 10,
+        pickup: activeTrip.pickup?.name || 'Origen',
+        destination: activeTrip.destination?.name || 'Destino',
+        status: 'COMPLETED',
+        rating: 5,
+      });
     }
     if (activeTrip) {
       addTripToHistory({
@@ -303,8 +336,13 @@ export const DriverHome = () => {
       {/* Top Header Toggle Status */}
       <div className="relative z-10 pt-safe px-4 pt-4 pointer-events-none space-y-2">
         <div className="flex items-center justify-between pointer-events-auto">
-          <div className="flex items-center gap-2 px-3.5 py-2 rounded-2xl bg-surface/90 border border-border-custom backdrop-blur-md shadow-lg">
-            <div className={`w-3 h-3 rounded-full ${isOnline ? 'bg-gold-primary animate-pulse' : 'bg-text-secondary'}`} />
+          <div className="flex items-center gap-2 px-3 py-1.5 rounded-2xl bg-surface/90 border border-gold-primary/30 backdrop-blur-md shadow-lg">
+            <img
+              src="/logo.png"
+              alt="RiberGO Logo"
+              className="w-5 h-5 object-contain rounded-md"
+            />
+            <div className={`w-2.5 h-2.5 rounded-full ${isOnline ? 'bg-gold-primary animate-pulse' : 'bg-text-secondary'}`} />
             <span className="text-xs font-bold uppercase tracking-wider">
               {isOnline ? 'En línea' : 'Fuera de línea'}
             </span>

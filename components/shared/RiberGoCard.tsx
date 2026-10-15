@@ -46,6 +46,11 @@ export const RiberGoCard = ({
         {/* CARD TOP BAR */}
         <div className="flex items-center justify-between z-10">
           <div className="flex items-center gap-2">
+            <img 
+              src="/logo.png" 
+              alt="RiberGO Logo" 
+              className="w-6 h-6 rounded-lg object-contain border border-gold-primary/40 shadow-sm"
+            />
             <span className="text-lg font-black tracking-tight flex items-center gap-1">
               <span className="text-white">Riber</span>
               <span className="text-gold-primary">GO</span>

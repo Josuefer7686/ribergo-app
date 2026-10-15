@@ -117,15 +117,12 @@ export const SmartPwaInstallModal = () => {
               {/* Header */}
               <div className="flex items-start justify-between">
                 <div className="flex items-center gap-4">
-                  <div className="relative w-14 h-14 rounded-2xl bg-gradient-to-br from-gold-primary to-amber-600 p-[1px] shadow-lg shadow-gold-primary/30 shrink-0">
-                    <div className="w-full h-full bg-surface/90 rounded-2xl flex items-center justify-center backdrop-blur-sm">
-                      <motion.div
-                        animate={{ y: [-2, 2, -2] }}
-                        transition={{ repeat: Infinity, duration: 3, ease: "easeInOut" }}
-                      >
-                        <Smartphone className="w-7 h-7 text-gold-primary drop-shadow-[0_0_8px_rgba(234,179,8,0.5)]" />
-                      </motion.div>
-                    </div>
+                  <div className="relative w-14 h-14 rounded-2xl shrink-0">
+                    <img
+                      src="/logo.png"
+                      alt="RiberGO Logo"
+                      className="w-full h-full object-contain rounded-2xl border border-gold-primary/40 shadow-xl shadow-gold-primary/20"
+                    />
                   </div>
                   <div>
                     <span className="flex items-center gap-1.5 text-[10px] font-black uppercase text-gold-primary tracking-[0.2em]">

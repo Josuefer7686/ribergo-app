@@ -30,6 +30,7 @@ export const LoginView = () => {
   const [pendingUserProfile, setPendingUserProfile] = useState<UserProfile | null>(null);
 
   const [isGoogleLoading, setIsGoogleLoading] = useState(false);
+  const [isGoogleLogin, setIsGoogleLogin] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   
   // Cupertino modal for unregistered user alert
@@ -151,6 +152,7 @@ export const LoginView = () => {
     try {
       const userProfile = await apiService.loginWithGoogle();
       setPendingUserProfile(userProfile);
+      setIsGoogleLogin(true);
       setIsLoading(false);
       setIsGoogleLoading(false);
 
@@ -173,11 +175,16 @@ export const LoginView = () => {
   // Called after iOS Success HUD animation completes (1.4s)
   const handleSuccessFinished = () => {
     if (pendingUserProfile) {
-      loginUser(pendingUserProfile);
-      if (pendingUserProfile.role) {
+      if (isGoogleLogin) {
+        // Al entrar con Google, dar SIEMPRE la opción de elegir entre Conductor y Pasajero
+        loginUser(pendingUserProfile, 'ROLE_SELECTION');
+        setCurrentView('ROLE_SELECTION');
+      } else if (pendingUserProfile.role) {
+        loginUser(pendingUserProfile, 'MAIN_APP');
         setRole(pendingUserProfile.role);
         setCurrentView('MAIN_APP');
       } else {
+        loginUser(pendingUserProfile, 'ROLE_SELECTION');
         setCurrentView('ROLE_SELECTION');
       }
     }
@@ -205,15 +212,15 @@ export const LoginView = () => {
       />
 
       <div className="pt-safe flex-1 flex flex-col justify-center max-w-sm mx-auto w-full">
-        {/* Header Branding */}
+        {/* Header Branding with Official Logo */}
         <div className="mb-4 text-center">
-          <div className="inline-flex items-center justify-center w-12 h-12 rounded-2xl bg-surface-2 border border-gold-primary/30 mb-2 shadow-lg shadow-gold-primary/10">
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#F4C542" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-              <circle cx="5.5" cy="17.5" r="3.5"/>
-              <circle cx="18.5" cy="17.5" r="3.5"/>
-              <path d="M15 6h2l3 5v5h-2"/>
-              <path d="M5.5 17.5L9 9h5l2.5 5"/>
-            </svg>
+          <div className="relative inline-flex items-center justify-center mb-2">
+            <div className="absolute inset-0 rounded-2xl bg-gold-primary/25 blur-lg" />
+            <img
+              src="/logo.png"
+              alt="RiberGO Logo"
+              className="w-16 h-16 object-contain rounded-2xl shadow-xl shadow-gold-primary/10 relative z-10 border border-gold-primary/30"
+            />
           </div>
           <h2 className="text-xl font-bold tracking-tight">Bienvenido a <span className="text-white">Riber</span><span className="text-gold-primary">GO</span></h2>
           <p className="text-[11px] text-text-secondary mt-0.5">Ingresa tu celular para iniciar sesión</p>

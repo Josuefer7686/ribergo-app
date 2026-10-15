@@ -4,7 +4,8 @@ import { useState, useRef, useEffect } from 'react';
 import { useAppStore } from '@/store/useAppStore';
 import { 
   Send, Sparkles, MapPin, DollarSign, Check, X, Shield, 
-  MessageSquare, Bike, User, ChevronRight, ThumbsUp, Flame, AlertCircle
+  MessageSquare, Bike, User, ChevronRight, ThumbsUp, Flame, AlertCircle,
+  Plus, Minus
  } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { haptics } from '@/utils/haptics';
@@ -42,7 +43,38 @@ export const NegotiationChatModal = () => {
 
   const [inputMessage, setInputMessage] = useState('');
   const [selectedDestinationName, setSelectedDestinationName] = useState<string>(activeTrip?.destination?.name || '');
+  const [viewportHeight, setViewportHeight] = useState<number | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  // Escuchar el tamaño real del visualViewport móvil cuando el teclado virtual sube/baja
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const updateHeight = () => {
+      if (window.visualViewport) {
+        setViewportHeight(window.visualViewport.height);
+      } else {
+        setViewportHeight(window.innerHeight);
+      }
+    };
+
+    if (window.visualViewport) {
+      window.visualViewport.addEventListener('resize', updateHeight);
+      window.visualViewport.addEventListener('scroll', updateHeight);
+      updateHeight();
+    } else {
+      window.addEventListener('resize', updateHeight);
+    }
+
+    return () => {
+      if (window.visualViewport) {
+        window.visualViewport.removeEventListener('resize', updateHeight);
+        window.visualViewport.removeEventListener('scroll', updateHeight);
+      } else {
+        window.removeEventListener('resize', updateHeight);
+      }
+    };
+  }, []);
 
   const rideId = activeTrip?.id;
   const currentFare = activeTrip?.proposedPrice || activeTrip?.price || 10;
@@ -68,10 +100,10 @@ export const NegotiationChatModal = () => {
     return () => unsubscribe();
   }, [rideId, isPassenger, setChatMessages]);
 
-  // Mantener scroll al final
+  // Mantener scroll al final solo cuando llega un nuevo mensaje
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [chatMessages]);
+  }, [chatMessages.length]);
 
   if (!isNegotiating || !activeTrip) return null;
 
@@ -154,16 +186,16 @@ export const NegotiationChatModal = () => {
     });
   };
 
-  // Cancelar negociación
+  // Cancelar negociación / rechazar conductor o pasajero para buscar otro
   const handleRejectOrCancel = async () => {
     if (!rideId) return;
     haptics.error();
 
     if (isPassenger) {
-      await apiService.cancelRideNegotiation(rideId);
+      await apiService.releaseRideNegotiation(rideId);
       setPassengerState('SEARCHING_DRIVER');
     } else {
-      await apiService.cancelRideNegotiation(rideId);
+      await apiService.releaseRideNegotiation(rideId);
       setActiveTrip(null);
       setDriverState('ONLINE');
     }
@@ -175,17 +207,22 @@ export const NegotiationChatModal = () => {
 
   return (
     <motion.div
-      initial={{ opacity: 0, y: 40 }}
+      initial={{ opacity: 0, y: 30 }}
       animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, y: 40 }}
-      className="fixed inset-0 z-50 bg-background/95 backdrop-blur-2xl flex flex-col justify-between max-w-md mx-auto"
+      exit={{ opacity: 0, y: 30 }}
+      transition={{ duration: 0.2 }}
+      className="fixed inset-x-0 top-0 z-50 bg-background flex flex-col justify-between max-w-md mx-auto overflow-hidden shadow-2xl"
+      style={{
+        height: viewportHeight ? `${viewportHeight}px` : '100dvh',
+        maxHeight: viewportHeight ? `${viewportHeight}px` : '100dvh',
+      }}
     >
       {/* HEADER NEGOCIACIÓN */}
-      <div className="pt-safe px-4 pt-4 pb-3 bg-surface border-b border-border-custom shadow-md space-y-3">
+      <div className="pt-safe px-4 pt-3 pb-2.5 bg-surface border-b border-border-custom shadow-md space-y-2.5 shrink-0">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="w-11 h-11 rounded-2xl bg-gold-primary/20 border-2 border-gold-primary/50 flex items-center justify-center text-gold-primary shadow-lg shadow-gold-primary/10">
-              {isPassenger ? <Bike className="w-6 h-6 animate-pulse" /> : <User className="w-6 h-6" />}
+            <div className="w-10 h-10 rounded-2xl bg-gold-primary/20 border-2 border-gold-primary/50 flex items-center justify-center text-gold-primary shadow-lg shadow-gold-primary/10">
+              {isPassenger ? <Bike className="w-5 h-5 animate-pulse" /> : <User className="w-5 h-5" />}
             </div>
             <div>
               <div className="flex items-center gap-1.5">
@@ -208,14 +245,14 @@ export const NegotiationChatModal = () => {
           </button>
         </div>
 
-        {/* BARRA SUPERIOR DE TARIFA DINÁMICA */}
-        <div className="p-3 rounded-2xl bg-gradient-to-r from-surface-2 via-surface to-surface-2 border border-gold-primary/40 flex items-center justify-between shadow-inner">
+        {/* BARRA SUPERIOR DE TARIFA DINÁMICA (SOLO 2 PINCHES BOTONES: - y + DE A 1 BS) */}
+        <div className="p-2.5 rounded-2xl bg-gradient-to-r from-surface-2 via-surface to-surface-2 border border-gold-primary/40 flex items-center justify-between shadow-inner">
           <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-xl bg-gold-primary/20 border border-gold-primary/40 flex items-center justify-center text-gold-primary">
+            <div className="w-8 h-8 rounded-xl bg-gold-primary/20 border border-gold-primary/40 flex items-center justify-center text-gold-primary shrink-0">
               <DollarSign className="w-4 h-4 stroke-[2.5]" />
             </div>
             <div>
-              <span className="text-[10px] uppercase tracking-wider font-extrabold text-text-secondary block">
+              <span className="text-[9px] uppercase tracking-wider font-extrabold text-text-secondary block">
                 Tarifa propuesta
               </span>
               <span className="text-lg font-black text-gold-primary leading-none">
@@ -224,40 +261,30 @@ export const NegotiationChatModal = () => {
             </div>
           </div>
 
-          {/* Botón de Aceptar Trato o Proponer */}
-          {isOfferFromOther ? (
+          {/* ÚNICOS DOS BOTONES: -1 Bs y +1 Bs */}
+          <div className="flex items-center gap-2">
             <button
-              onClick={handleAcceptFareAndStart}
-              className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 text-white font-black text-xs uppercase tracking-wider shadow-lg shadow-emerald-500/30 flex items-center gap-1.5 active:scale-95 animate-bounce"
+              type="button"
+              onClick={() => handleProposeFare(Math.max(5, currentFare - 1))}
+              className="w-10 h-10 rounded-2xl bg-surface-2 hover:bg-surface border border-gold-primary/40 text-gold-primary flex items-center justify-center transition active:scale-90 shadow-sm shrink-0"
+              title="Quitar 1 Bs"
             >
-              <ThumbsUp className="w-4 h-4" />
-              <span>Aceptar {currentFare} Bs</span>
+              <Minus className="w-5 h-5 stroke-[3]" />
             </button>
-          ) : (
-            <div className="flex items-center gap-1.5">
-              <button
-                onClick={() => handleProposeFare(Math.max(5, currentFare - 2))}
-                className="w-8 h-8 rounded-xl bg-surface hover:bg-surface-2 border border-border-custom text-white font-black text-sm flex items-center justify-center transition active:scale-95"
-                title="Bajar 2 Bs"
-              >
-                -2
-              </button>
-              <button
-                onClick={() => handleProposeFare(currentFare + 2)}
-                className="px-2.5 py-1.5 rounded-xl bg-gold-primary/20 hover:bg-gold-primary/30 border border-gold-primary/50 text-gold-primary font-black text-xs flex items-center gap-1 transition active:scale-95"
-                title="Subir 2 Bs"
-              >
-                +2 Bs
-              </button>
-              <button
-                onClick={() => handleProposeFare(currentFare + 5)}
-                className="px-2.5 py-1.5 rounded-xl bg-gold-primary hover:bg-gold-light text-background font-black text-xs flex items-center gap-1 transition active:scale-95 shadow-md shadow-gold-primary/20"
-                title="Subir 5 Bs"
-              >
-                +5 Bs
-              </button>
-            </div>
-          )}
+
+            <span className="text-xs font-black text-white px-0.5 select-none whitespace-nowrap">
+              {currentFare} Bs
+            </span>
+
+            <button
+              type="button"
+              onClick={() => handleProposeFare(currentFare + 1)}
+              className="w-10 h-10 rounded-2xl bg-gold-primary hover:bg-gold-light text-background flex items-center justify-center transition active:scale-90 shadow-md shadow-gold-primary/25 shrink-0"
+              title="Aumentar 1 Bs"
+            >
+              <Plus className="w-5 h-5 stroke-[3]" />
+            </button>
+          </div>
         </div>
       </div>
 
@@ -306,7 +333,7 @@ export const NegotiationChatModal = () => {
       </div>
 
       {/* CONTROLES INFERIORES: CHIPS RÁPIDOS Y TECLADO */}
-      <div className="p-3 bg-surface border-t border-border-custom space-y-2.5 pb-safe">
+      <div className={`p-3 bg-surface border-t border-border-custom space-y-2 shrink-0 ${viewportHeight && viewportHeight < 550 ? 'pb-2' : 'pb-safe'}`}>
         {/* Chips de destinos comunes de Riberalta (solo para pasajero) */}
         {isPassenger && (
           <div className="space-y-1">
@@ -318,6 +345,7 @@ export const NegotiationChatModal = () => {
               {RIBERALTA_QUICK_DESTINATIONS.map((dest) => (
                 <button
                   key={dest}
+                  type="button"
                   onClick={() => handleSendMessage(`Voy a ${dest}, pariente.`)}
                   className="px-2.5 py-1.5 rounded-xl bg-surface-2 hover:bg-surface border border-gold-primary/30 text-white font-bold text-[11px] whitespace-nowrap active:scale-95 transition shrink-0"
                 >
@@ -334,6 +362,7 @@ export const NegotiationChatModal = () => {
             {['¿A qué barrio vamos pariente?', 'Hasta allá son 15 Bs camba', '¿Cerca o lejos?', '¡Ya voy saliendo!'].map((phrase) => (
               <button
                 key={phrase}
+                type="button"
                 onClick={() => handleSendMessage(phrase)}
                 className="px-2.5 py-1.5 rounded-xl bg-surface-2 hover:bg-surface border border-gold-primary/30 text-white font-bold text-[11px] whitespace-nowrap active:scale-95 transition shrink-0"
               >
@@ -350,8 +379,20 @@ export const NegotiationChatModal = () => {
             value={inputMessage}
             onChange={(e) => setInputMessage(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()}
+            onFocus={() => {
+              setTimeout(() => {
+                messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+              }, 200);
+            }}
             placeholder={isPassenger ? 'Escribe a dónde vas (ej: Final Jacarandá)...' : 'Escribe tu respuesta camba...'}
-            className="flex-1 bg-surface-2 border border-border-custom rounded-2xl py-3 px-4 text-xs text-white placeholder-text-secondary focus:outline-none focus:border-gold-primary transition"
+            className="flex-1 bg-surface-2 border border-border-custom rounded-2xl py-3 px-4 text-white placeholder-text-secondary focus:outline-none focus:border-gold-primary transition"
+            style={{
+              fontSize: '16px', // 16px exacto para prevenir el auto-zoom de iOS Safari que rompe el cursor y cierra el teclado
+              userSelect: 'text',
+              WebkitUserSelect: 'text',
+            }}
+            autoComplete="off"
+            autoCorrect="on"
           />
 
           <button

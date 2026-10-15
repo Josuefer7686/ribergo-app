@@ -7,8 +7,18 @@ service cloud.firestore {
       allow read, write: if true;
     }
 
+    // Solicitudes activas en tiempo real (autodestrucción inmediata al cancelar o finalizar)
+    match /active_requests/{requestId} {
+      allow read, write, delete: if true;
+    }
+
     // Rides / Solicitudes en tiempo real
     match /rides/{rideId} {
+      allow read, write, delete: if true;
+    }
+
+    // Historial forense y de seguridad inmutable
+    match /trips_history/{tripId} {
       allow read, write: if true;
     }
 

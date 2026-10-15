@@ -16,31 +16,24 @@ export const SplashView = () => {
           transition={{ duration: 0.8, ease: [0.16, 1, 0.3, 1] }}
           className="flex flex-col items-center"
         >
-          {/* Minimalist Mototaxi Icon */}
-          <div className="w-20 h-20 rounded-3xl bg-surface-2 border border-gold-primary/30 flex items-center justify-center mb-6 shadow-2xl shadow-gold-primary/10 relative">
-            <div className="absolute inset-0 rounded-3xl bg-gold-primary/10 animate-pulse" />
-            <svg width="42" height="42" viewBox="0 0 24 24" fill="none" stroke="#F4C542" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <circle cx="5.5" cy="17.5" r="3.5"/>
-              <circle cx="18.5" cy="17.5" r="3.5"/>
-              <path d="M15 6h2l3 5v5h-2"/>
-              <path d="M5.5 17.5L9 9h5l2.5 5"/>
-            </svg>
+          {/* Official RiberGO Logo with Ambient Aura Glow */}
+          <div className="relative w-36 h-36 mb-4 flex items-center justify-center">
+            <div className="absolute inset-0 rounded-[2.5rem] bg-gold-primary/30 blur-2xl animate-pulse" />
+            <img
+              src="/logo.png"
+              alt="RiberGO Logo Oficial"
+              className="w-36 h-36 object-contain rounded-[2.5rem] shadow-[0_20px_40px_rgba(0,0,0,0.85)] relative z-10"
+            />
           </div>
-
-          {/* Logo */}
-          <h1 className="text-4xl font-extrabold tracking-tight mb-2">
-            <span className="text-white">Riber</span>
-            <span className="text-gold-primary">GO</span>
-          </h1>
 
           {/* Slogan */}
           <motion.p
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.4, duration: 0.6 }}
-            className="text-text-secondary text-sm font-medium tracking-wide uppercase"
+            transition={{ delay: 0.3, duration: 0.6 }}
+            className="text-text-secondary text-xs font-bold tracking-[0.2em] uppercase"
           >
-            Mototaxis a un toque
+            Tu transporte, más cerca • Riberalta
           </motion.p>
         </motion.div>
       </div>

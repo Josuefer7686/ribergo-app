@@ -173,7 +173,7 @@ interface AppState {
   role: UserRole | null;
   pendingRegisterPhone: string;
   setPendingRegisterPhone: (phone: string) => void;
-  loginUser: (user: UserProfile) => void;
+  loginUser: (user: UserProfile, targetView?: AppView) => void;
   setRole: (role: UserRole) => void;
   logout: () => void;
 
@@ -256,7 +256,7 @@ export const useAppStore = create<AppState>()(
       role: 'PASSENGER',
       pendingRegisterPhone: '',
       setPendingRegisterPhone: (phone) => set({ pendingRegisterPhone: phone }),
-      loginUser: (user) => {
+      loginUser: (user, targetView = 'MAIN_APP') => {
         // Driver wallet starts strictly with real balance (0 BOB if new). 5 free gift rides only if new driver.
         const updatedUser: UserProfile = {
           ...user,
@@ -264,7 +264,7 @@ export const useAppStore = create<AppState>()(
           accountNumber: user.accountNumber || `RBT-4820-${Math.floor(1000 + Math.random() * 9000)}`,
           freeTripsRemaining: typeof user.freeTripsRemaining === 'number' ? user.freeTripsRemaining : (user.role === 'DRIVER' ? 5 : 0),
         };
-        set({ user: updatedUser, role: updatedUser.role, currentView: 'MAIN_APP', activeTab: 'HOME' });
+        set({ user: updatedUser, role: updatedUser.role || 'PASSENGER', currentView: targetView, activeTab: 'HOME' });
       },
       updateUserProfile: (data) => set((state) => ({
         user: state.user ? { ...state.user, ...data } : null,

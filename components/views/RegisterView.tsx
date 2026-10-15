@@ -161,8 +161,7 @@ export const RegisterView = () => {
   // Called after iOS Success HUD animation finishes (1.4s)
   const handleSuccessFinished = () => {
     if (pendingUserProfile) {
-      loginUser(pendingUserProfile);
-      setRole('PASSENGER');
+      loginUser(pendingUserProfile, 'ROLE_SELECTION');
       setCurrentView('ROLE_SELECTION');
     }
   };
@@ -197,9 +196,19 @@ export const RegisterView = () => {
           <span className="ml-2.5 text-[11px] font-semibold text-text-secondary uppercase">Crear Cuenta</span>
         </div>
 
-        <div className="mb-3">
-          <h2 className="text-xl font-bold tracking-tight">Únete a <span className="text-white">Riber</span><span className="text-gold-primary">GO</span></h2>
-          <p className="text-[11px] text-text-secondary mt-0.5">Ingresa tu nombre y celular para registrarte</p>
+        <div className="mb-3 flex items-center gap-3">
+          <div className="relative shrink-0">
+            <div className="absolute inset-0 rounded-2xl bg-gold-primary/25 blur-md" />
+            <img
+              src="/logo.png"
+              alt="RiberGO Logo"
+              className="w-12 h-12 object-contain rounded-2xl shadow-lg relative z-10 border border-gold-primary/30"
+            />
+          </div>
+          <div>
+            <h2 className="text-xl font-bold tracking-tight">Únete a <span className="text-white">Riber</span><span className="text-gold-primary">GO</span></h2>
+            <p className="text-[11px] text-text-secondary mt-0.5">Ingresa tu nombre y celular para registrarte</p>
+          </div>
         </div>
 
         {errorMsg && (
