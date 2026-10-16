@@ -506,13 +506,16 @@ export const PassengerHome = () => {
               </div>
 
               <button
-                onClick={async () => {
+                onClick={() => {
                   haptics.selection();
-                  if (activeTrip?.id) {
-                    await apiService.cancelRideRequest(activeTrip.id);
-                  }
+                  const tripId = activeTrip?.id;
+                  // 1. Optimistic UI: cerrar INMEDIATAMENTE (0ms)
                   setActiveTrip(null);
                   setPassengerState('IDLE');
+                  // 2. Limpieza en Firestore en segundo plano
+                  if (tripId) {
+                    apiService.cancelRideRequest(tripId);
+                  }
                 }}
                 className="px-4 py-2 rounded-xl bg-surface-2 text-xs font-semibold text-text-secondary hover:text-white transition active:scale-95"
               >

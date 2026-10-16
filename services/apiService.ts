@@ -1192,22 +1192,25 @@ export const apiService = {
    * Send real-time chat message inside ride
    */
   async sendMessage(rideId: string, senderRole: 'PASSENGER' | 'DRIVER', text: string) {
+    const nowMs = Date.now();
     const msg = {
-      id: 'msg-' + Date.now() + '-' + Math.random().toString(36).substr(2, 4),
+      id: 'msg-' + nowMs + '-' + Math.random().toString(36).substr(2, 4),
       sender: senderRole,
       text,
       time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      createdAtMs: Date.now(),
+      createdAtMs: nowMs,
     };
 
-    // Guardar y emitir inmediatamente por el bus local
+    // 1. Guardar y emitir inmediatamente por el bus local (0ms)
     realtimeSyncBus.saveMessage(rideId, msg);
 
+    // 2. Persistir en Firestore en tiempo real con marca temporal en ms
     if (isFirebaseConfigured()) {
       try {
         addDoc(collection(db, 'rides', rideId, 'messages'), {
           sender: senderRole,
           text,
+          createdAtMs: nowMs,
           createdAt: serverTimestamp(),
         }).catch((err) => {
           console.warn('Firestore addDoc chat error:', err?.message || err);
@@ -1220,26 +1223,51 @@ export const apiService = {
   },
 
   /**
-   * Listen to real-time chat messages for a ride
+   * Listen to real-time chat messages for a ride (merged 0ms local bus + Firestore)
    */
   subscribeToMessages(rideId: string, callback: (messages: any[]) => void) {
-    const unsubBus = realtimeSyncBus.subscribeMessages(rideId, callback);
+    const messageMap = new Map<string, any>();
 
+    const emitMerged = (freshList: any[] = []) => {
+      for (const m of freshList) {
+        if (m.id) {
+          messageMap.set(m.id, m);
+        } else if (m.text && m.createdAtMs) {
+          messageMap.set(`${m.sender}-${m.createdAtMs}-${m.text.slice(0, 8)}`, m);
+        }
+      }
+      const sorted = Array.from(messageMap.values()).sort((a, b) => {
+        const tA = a.createdAtMs || 0;
+        const tB = b.createdAtMs || 0;
+        return tA - tB;
+      });
+      callback(sorted);
+    };
+
+    // 1. Bus local (0ms de latencia para ver el mensaje inmediatamente)
+    const unsubBus = realtimeSyncBus.subscribeMessages(rideId, (busMsgs) => {
+      emitMerged(busMsgs);
+    });
+
+    // 2. Firestore en tiempo real ordenado por createdAtMs
     let unsubFirestore = () => {};
     if (isFirebaseConfigured()) {
       try {
-        const q = query(collection(db, 'rides', rideId, 'messages'), orderBy('createdAt', 'asc'));
+        const q = query(collection(db, 'rides', rideId, 'messages'), orderBy('createdAtMs', 'asc'));
         unsubFirestore = onSnapshot(
           q,
           (snapshot) => {
-            const msgs = snapshot.docs.map((docSnap) => ({
-              id: docSnap.id,
-              ...docSnap.data(),
-              time: docSnap.data().createdAt?.toDate()?.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) || 'Ahora',
-            }));
-            if (msgs.length > 0) {
-              callback(msgs);
-            }
+            const fsMsgs = snapshot.docs.map((docSnap) => {
+              const data = docSnap.data();
+              const timeStr = data.createdAt?.toDate?.()?.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                || (data.createdAtMs ? new Date(data.createdAtMs).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Ahora');
+              return {
+                id: docSnap.id,
+                ...data,
+                time: timeStr,
+              };
+            });
+            emitMerged(fsMsgs);
           },
           (err) => {
             console.warn('Firestore chat messages listener error (usando bus local):', err?.message || err);

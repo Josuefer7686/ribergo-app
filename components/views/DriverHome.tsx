@@ -37,6 +37,7 @@ export const DriverHome = () => {
 
   const simStepRef = useRef(0);
   const lastLocationRef = useRef<LocationPoint | null>(currentLocation);
+  const isAcceptingRef = useRef(false);
 
   // Rejected ride IDs for this driver session (en caso de ser rechazado, no volver a mostrar al mismo conductor)
   const [rejectedRideIds, setRejectedRideIds] = useState<string[]>(() => {
@@ -251,7 +252,7 @@ export const DriverHome = () => {
       const availableRides = pendingRides.filter((r) => !rejectedRideIds.includes(r.id));
 
       // Si el chofer está en la tarjeta de solicitud entrante pero el pasajero canceló la búsqueda (autodestrucción en Firestore)
-      if (driverState === 'RIDE_REQUEST') {
+      if (driverState === 'RIDE_REQUEST' && !isAcceptingRef.current) {
         const stillPending = pendingRides.some((r) => r.id === pendingRequest?.id);
         if (!stillPending) {
           // Solicitud esfumada inmediatamente
@@ -325,29 +326,38 @@ export const DriverHome = () => {
   }, [driverState, pendingRequest?.id, setDriverState, setPendingRequest]);
 
   const handleAcceptRequest = async () => {
+    if (!pendingRequest || isAcceptingRef.current) return;
+    isAcceptingRef.current = true;
     haptics.heavy();
     audio.driverTripAccepted();
-    if (pendingRequest) {
-      const driverData = {
-        id: driverId,
-        name: driverName,
-        phone: driverPhone,
-        rating: 5.0,
-        trips: 24,
-        avatar: user?.avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=150&q=80',
-        motorcycle,
-        plate,
-        currentLocation: currentLocation || { lat: -11.0061, lng: -66.0747 },
-      };
 
-      await apiService.acceptRide(pendingRequest.id, driverData);
-      setActiveTrip({
-        ...pendingRequest,
-        status: 'NEGOTIATING',
-        driver: driverData,
-      });
-      setPendingRequest(null);
-      setDriverState('NEGOTIATING');
+    const rideToAccept = pendingRequest;
+    const driverData = {
+      id: driverId,
+      name: driverName,
+      phone: driverPhone,
+      rating: 5.0,
+      trips: 24,
+      avatar: user?.avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=150&q=80',
+      motorcycle,
+      plate,
+      currentLocation: currentLocation || { lat: -11.0061, lng: -66.0747 },
+    };
+
+    // 1. Inmediatamente fijar estado NEGOTIATING (0ms) para abrir el chat del chofer sin demoras
+    setDriverState('NEGOTIATING');
+    setActiveTrip({
+      ...rideToAccept,
+      status: 'NEGOTIATING',
+      driver: driverData,
+    });
+    setPendingRequest(null);
+
+    // 2. Persistir en Firestore de fondo
+    try {
+      await apiService.acceptRide(rideToAccept.id, driverData);
+    } finally {
+      isAcceptingRef.current = false;
     }
   };
 

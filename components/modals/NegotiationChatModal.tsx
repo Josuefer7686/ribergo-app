@@ -46,21 +46,21 @@ export const NegotiationChatModal = () => {
   const [viewportHeight, setViewportHeight] = useState<number | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  // Escuchar el tamaño real del visualViewport móvil cuando el teclado virtual sube/baja
+  // Escuchar únicamente resize del visualViewport móvil (evitar evento 'scroll' que cierra el teclado al editar texto)
   useEffect(() => {
     if (typeof window === 'undefined') return;
 
+    let lastH = 0;
     const updateHeight = () => {
-      if (window.visualViewport) {
-        setViewportHeight(window.visualViewport.height);
-      } else {
-        setViewportHeight(window.innerHeight);
+      const h = window.visualViewport ? Math.round(window.visualViewport.height) : window.innerHeight;
+      if (Math.abs(h - lastH) > 10) {
+        lastH = h;
+        setViewportHeight(h);
       }
     };
 
     if (window.visualViewport) {
       window.visualViewport.addEventListener('resize', updateHeight);
-      window.visualViewport.addEventListener('scroll', updateHeight);
       updateHeight();
     } else {
       window.addEventListener('resize', updateHeight);
@@ -69,7 +69,6 @@ export const NegotiationChatModal = () => {
     return () => {
       if (window.visualViewport) {
         window.visualViewport.removeEventListener('resize', updateHeight);
-        window.visualViewport.removeEventListener('scroll', updateHeight);
       } else {
         window.removeEventListener('resize', updateHeight);
       }
@@ -77,9 +76,14 @@ export const NegotiationChatModal = () => {
   }, []);
 
   const rideId = activeTrip?.id;
-  const currentFare = activeTrip?.proposedPrice || activeTrip?.price || 10;
-  const offeredBy = activeTrip?.priceOfferedBy;
-  const isOfferFromOther = offeredBy && ((isPassenger && offeredBy === 'DRIVER') || (!isPassenger && offeredBy === 'PASSENGER'));
+  const myRole = isPassenger ? 'PASSENGER' : 'DRIVER';
+  const [adjustedFare, setAdjustedFare] = useState<number | null>(null);
+  const debounceFareTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Tarifa efectiva: si el usuario está pulsando +/- usa adjustedFare local, de lo contrario la tarifa en store
+  const localFare = adjustedFare !== null 
+    ? adjustedFare 
+    : (activeTrip?.proposedPrice || activeTrip?.price || 10);
 
   const hasSentGreetingRef = useRef(false);
 
@@ -107,15 +111,16 @@ export const NegotiationChatModal = () => {
 
   if (!isNegotiating || !activeTrip) return null;
 
-  // Enviar mensaje de texto
-  const handleSendMessage = async (textToSend?: string) => {
+  // Enviar mensaje de texto con emisión instantánea (0ms)
+  const handleSendMessage = (textToSend?: string) => {
     const text = (textToSend || inputMessage).trim();
     if (!text || !rideId) return;
 
     haptics.selection();
     setInputMessage('');
 
-    await apiService.sendMessage(rideId, isPassenger ? 'PASSENGER' : 'DRIVER', text);
+    // Emitir mensaje por el bus local a 0ms y sincronizar con Firestore en segundo plano
+    apiService.sendMessage(rideId, myRole, text);
 
     // Si el pasajero escribe un lugar o lo pulsa de los chips, actualizar el destino
     if (isPassenger) {
@@ -132,42 +137,61 @@ export const NegotiationChatModal = () => {
     }
   };
 
-  // Proponer tarifa
-  const handleProposeFare = async (newPrice: number) => {
+  // Proponer tarifa con debounce (aumenta o resta instantáneamente a 0ms sin saltos ni retrocesos)
+  const handleProposeFare = (newPrice: number) => {
     if (!rideId) return;
     haptics.heavy();
 
-    await apiService.proposeRideFare(
-      rideId, 
-      newPrice, 
-      isPassenger ? 'PASSENGER' : 'DRIVER',
-      selectedDestinationName || activeTrip.destination.name
-    );
+    const clampedPrice = Math.max(5, Math.min(200, newPrice));
+    
+    // 1. Actualización visual instantánea a 0ms en pantalla y en store
+    setAdjustedFare(clampedPrice);
+    if (activeTrip) {
+      setActiveTrip({
+        ...activeTrip,
+        proposedPrice: clampedPrice,
+        priceOfferedBy: myRole,
+      });
+    }
 
-    const senderRole = isPassenger ? 'PASSENGER' : 'DRIVER';
-    const msgText = isPassenger 
-      ? `Te ofrezco ${newPrice} BOB pariente, ¿le metemos?` 
-      : `Por la distancia hasta allá te sale ${newPrice} BOB camba, ¿trato hecho?`;
+    // 2. Debounce: Si el usuario pulsa 3 veces seguidas rápido, solo se envía 1 sola solicitud con el valor final
+    if (debounceFareTimerRef.current) {
+      clearTimeout(debounceFareTimerRef.current);
+    }
 
-    await apiService.sendMessage(rideId, senderRole, msgText);
+    debounceFareTimerRef.current = setTimeout(async () => {
+      try {
+        await apiService.proposeRideFare(
+          rideId, 
+          clampedPrice, 
+          myRole,
+          selectedDestinationName || activeTrip.destination?.name
+        );
+
+        const msgText = isPassenger 
+          ? `Te ofrezco ${clampedPrice} BOB pariente, ¿le metemos?` 
+          : `Por la distancia hasta allá te sale ${clampedPrice} BOB camba, ¿trato hecho?`;
+
+        await apiService.sendMessage(rideId, myRole, msgText);
+      } catch (err) {
+        console.warn('Error proponiendo tarifa debounced:', err);
+      } finally {
+        setAdjustedFare(null);
+      }
+    }, 450);
   };
 
-  // Aceptar la tarifa y cerrar negociación
+  // Aceptar la tarifa y cerrar negociación (0ms)
   const handleAcceptFareAndStart = async () => {
     if (!rideId) return;
     haptics.success();
     audio.driverTripAccepted();
 
-    const finalPrice = activeTrip.proposedPrice || activeTrip.price || 10;
+    const finalPrice = localFare;
     const finalDest = selectedDestinationName || activeTrip.destination.name || 'Destino acordado';
+    const currentRideId = rideId;
 
-    await apiService.confirmRideFare(rideId, finalPrice, finalDest);
-    await apiService.sendMessage(
-      rideId, 
-      isPassenger ? 'PASSENGER' : 'DRIVER', 
-      `¡Trato hecho camba! Nos vemos en ${finalPrice} BOB. Voy en camino.`
-    );
-
+    // 1. Optimistic UI: cerrar modal de negociación y avanzar estado inmediatamente (0ms)
     if (isPassenger) {
       setPassengerState('DRIVER_FOUND');
     } else {
@@ -184,21 +208,32 @@ export const NegotiationChatModal = () => {
         name: finalDest,
       }
     });
+
+    // 2. Notificar en Firestore de fondo
+    await apiService.confirmRideFare(currentRideId, finalPrice, finalDest);
+    await apiService.sendMessage(
+      currentRideId, 
+      myRole, 
+      `¡Trato hecho camba! Nos vemos en ${finalPrice} BOB. Voy en camino.`
+    );
   };
 
-  // Cancelar negociación / rechazar conductor o pasajero para buscar otro
-  const handleRejectOrCancel = async () => {
+  // Cancelar negociación / rechazar conductor o pasajero para buscar otro (0ms)
+  const handleRejectOrCancel = () => {
     if (!rideId) return;
     haptics.error();
+    const currentRideId = rideId;
 
+    // 1. Optimistic UI: salir de negociación en 0ms
     if (isPassenger) {
-      await apiService.releaseRideNegotiation(rideId);
       setPassengerState('SEARCHING_DRIVER');
     } else {
-      await apiService.releaseRideNegotiation(rideId);
       setActiveTrip(null);
       setDriverState('ONLINE');
     }
+
+    // 2. Liberar en Firestore de fondo
+    apiService.releaseRideNegotiation(currentRideId);
   };
 
   const otherPersonName = isPassenger 
@@ -256,7 +291,7 @@ export const NegotiationChatModal = () => {
                 Tarifa propuesta
               </span>
               <span className="text-lg font-black text-gold-primary leading-none">
-                {currentFare} <span className="text-xs font-bold text-white">BOB</span>
+                {localFare} <span className="text-xs font-bold text-white">BOB</span>
               </span>
             </div>
           </div>
@@ -265,7 +300,7 @@ export const NegotiationChatModal = () => {
           <div className="flex items-center gap-2">
             <button
               type="button"
-              onClick={() => handleProposeFare(Math.max(5, currentFare - 1))}
+              onClick={() => handleProposeFare(localFare - 1)}
               className="w-10 h-10 rounded-2xl bg-surface-2 hover:bg-surface border border-gold-primary/40 text-gold-primary flex items-center justify-center transition active:scale-90 shadow-sm shrink-0"
               title="Quitar 1 Bs"
             >
@@ -273,12 +308,12 @@ export const NegotiationChatModal = () => {
             </button>
 
             <span className="text-xs font-black text-white px-0.5 select-none whitespace-nowrap">
-              {currentFare} Bs
+              {localFare} Bs
             </span>
 
             <button
               type="button"
-              onClick={() => handleProposeFare(currentFare + 1)}
+              onClick={() => handleProposeFare(localFare + 1)}
               className="w-10 h-10 rounded-2xl bg-gold-primary hover:bg-gold-light text-background flex items-center justify-center transition active:scale-90 shadow-md shadow-gold-primary/25 shrink-0"
               title="Aumentar 1 Bs"
             >
@@ -410,7 +445,7 @@ export const NegotiationChatModal = () => {
           className="w-full py-3 bg-gradient-to-r from-gold-primary to-amber-400 text-background rounded-2xl font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 shadow-xl shadow-gold-primary/25 transition active:scale-[0.98]"
         >
           <Check className="w-4 h-4 stroke-[3]" />
-          <span>Confirmar e Iniciar Viaje por {currentFare} BOB</span>
+          <span>Confirmar e Iniciar Viaje por {localFare} BOB</span>
         </button>
       </div>
     </motion.div>
