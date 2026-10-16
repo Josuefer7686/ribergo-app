@@ -920,19 +920,24 @@ export const apiService = {
    * Listen to pending ride requests for online drivers (Hybrid RealtimeSyncBus + Firestore 'rides' collection)
    */
   subscribeToPendingRides(callback: (rides: any[]) => void) {
-    const notifyCombined = (firestoreRides: any[] = []) => {
+    let lastFirestoreRides: any[] = [];
+
+    const notifyCombined = () => {
       const busRides = realtimeSyncBus.getPendingRides();
       const rideMap = new Map<string, any>();
 
       // 1. Añadir viajes locales del bus
       for (const r of busRides) {
-        rideMap.set(r.id, r);
+        if (r && r.id) {
+          rideMap.set(r.id, r);
+        }
       }
 
-      // 2. Añadir y fusionar viajes de Firestore
-      for (const r of firestoreRides) {
-        rideMap.set(r.id, r);
-        realtimeSyncBus.saveRide(r);
+      // 2. Añadir y fusionar viajes de Firestore sin disparar eventos recursivos
+      for (const r of lastFirestoreRides) {
+        if (r && r.id) {
+          rideMap.set(r.id, r);
+        }
       }
 
       // 3. Filtrar estrictamente solicitudes buscando conductor, sin chofer asignado y vigentes (< 20 min)
@@ -953,7 +958,7 @@ export const apiService = {
       callback(validPending);
     };
 
-    // 1. Suscribirse inmediatamente a RealtimeSyncBus (0ms)
+    // 1. Suscribirse a RealtimeSyncBus (0ms)
     const unsubBus = realtimeSyncBus.subscribePendingRides(() => {
       notifyCombined();
     });
@@ -965,14 +970,14 @@ export const apiService = {
         unsubFirestore = onSnapshot(
           collection(db, 'rides'),
           (snapshot) => {
-            const freshPendingRides = snapshot.docs
+            lastFirestoreRides = snapshot.docs
               .map(docSnap => ({
                 id: docSnap.id,
                 ...docSnap.data()
               } as any))
               .filter(r => r.status === 'SEARCHING_DRIVER' && !r.driverId);
 
-            notifyCombined(freshPendingRides);
+            notifyCombined();
           },
           (err) => {
             console.warn('Firestore rides listener notice (usando bus local):', err?.message || err);
@@ -1189,12 +1194,23 @@ export const apiService = {
   },
 
   /**
-   * Send real-time chat message inside ride
+   * Send real-time chat message inside ride (0ms latency, zero duplicate guarantee)
    */
   async sendMessage(rideId: string, senderRole: 'PASSENGER' | 'DRIVER', text: string) {
     const nowMs = Date.now();
+    let msgId = 'msg-' + nowMs + '-' + Math.random().toString(36).substring(2, 7);
+    let msgDocRef: any = null;
+
+    if (isFirebaseConfigured()) {
+      try {
+        // Pre-generar la referencia en Firestore para que el ID local del bus y de Firestore sean exactamente idénticos
+        msgDocRef = doc(collection(db, 'rides', rideId, 'messages'));
+        msgId = msgDocRef.id;
+      } catch (e) {}
+    }
+
     const msg = {
-      id: 'msg-' + nowMs + '-' + Math.random().toString(36).substr(2, 4),
+      id: msgId,
       sender: senderRole,
       text,
       time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
@@ -1204,38 +1220,60 @@ export const apiService = {
     // 1. Guardar y emitir inmediatamente por el bus local (0ms)
     realtimeSyncBus.saveMessage(rideId, msg);
 
-    // 2. Persistir en Firestore en tiempo real con marca temporal en ms
-    if (isFirebaseConfigured()) {
-      try {
-        addDoc(collection(db, 'rides', rideId, 'messages'), {
-          sender: senderRole,
-          text,
-          createdAtMs: nowMs,
-          createdAt: serverTimestamp(),
-        }).catch((err) => {
-          console.warn('Firestore addDoc chat error:', err?.message || err);
-        });
-      } catch (err) {
-        console.warn('Firestore Send Message Error:', err);
-      }
+    // 2. Persistir en Firestore con el mismo ID de documento
+    if (isFirebaseConfigured() && msgDocRef) {
+      setDoc(msgDocRef, {
+        sender: senderRole,
+        text,
+        createdAtMs: nowMs,
+        createdAt: serverTimestamp(),
+      }).catch((err) => {
+        console.warn('Firestore setDoc chat error:', err?.message || err);
+      });
     }
     return msg;
   },
 
   /**
-   * Listen to real-time chat messages for a ride (merged 0ms local bus + Firestore)
+   * Listen to real-time chat messages for a ride (merged 0ms local bus + Firestore with semantic deduplication)
    */
   subscribeToMessages(rideId: string, callback: (messages: any[]) => void) {
     const messageMap = new Map<string, any>();
 
     const emitMerged = (freshList: any[] = []) => {
       for (const m of freshList) {
-        if (m.id) {
-          messageMap.set(m.id, m);
-        } else if (m.text && m.createdAtMs) {
-          messageMap.set(`${m.sender}-${m.createdAtMs}-${m.text.slice(0, 8)}`, m);
+        if (!m || !m.text) continue;
+        const cleanText = m.text.trim();
+        const timeBucket = Math.floor((m.createdAtMs || Date.now()) / 2000);
+        const semanticKey = `${m.sender}-${cleanText}-${timeBucket}`;
+
+        // 1. Si coincide por ID exacto, actualizar
+        if (m.id && messageMap.has(m.id)) {
+          messageMap.set(m.id, { ...messageMap.get(m.id), ...m });
+        } else {
+          // 2. Verificar deduplicación semántica (mismo remitente, mismo texto en ventana de 2 segundos)
+          let duplicateExistingId: string | null = null;
+          for (const [existingId, existingMsg] of messageMap.entries()) {
+            const existingTimeBucket = Math.floor((existingMsg.createdAtMs || Date.now()) / 2000);
+            const existingSemantic = `${existingMsg.sender}-${existingMsg.text?.trim()}-${existingTimeBucket}`;
+            if (existingSemantic === semanticKey) {
+              duplicateExistingId = existingId;
+              break;
+            }
+          }
+
+          if (duplicateExistingId) {
+            // Reemplazar la entrada existente con la versión más reciente/oficial
+            const existingMsg = messageMap.get(duplicateExistingId);
+            messageMap.delete(duplicateExistingId);
+            const finalId = m.id || duplicateExistingId;
+            messageMap.set(finalId, { ...existingMsg, ...m, id: finalId });
+          } else {
+            messageMap.set(m.id || semanticKey, m);
+          }
         }
       }
+
       const sorted = Array.from(messageMap.values()).sort((a, b) => {
         const tA = a.createdAtMs || 0;
         const tB = b.createdAtMs || 0;
@@ -1270,11 +1308,11 @@ export const apiService = {
             emitMerged(fsMsgs);
           },
           (err) => {
-            console.warn('Firestore chat messages listener error (usando bus local):', err?.message || err);
+            console.warn('Firestore messages onSnapshot warning:', err?.message || err);
           }
         );
       } catch (e) {
-        console.warn('Firestore subscribeToMessages error:', e);
+        console.warn('Firestore chat query error:', e);
       }
     }
 

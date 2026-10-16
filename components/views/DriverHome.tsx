@@ -11,7 +11,7 @@ import { haptics } from '@/utils/haptics';
 import { audio } from '@/utils/audio';
 import { calculateBearing, calculateDistanceMeters } from '@/utils/geo';
 
-import { apiService } from '@/services/apiService';
+import { apiService, realtimeSyncBus } from '@/services/apiService';
 import { DriverWalletTutorialModal } from '@/components/modals/DriverWalletTutorialModal';
 import { QrTopupModal } from '@/components/modals/QrTopupModal';
 import { NegotiationChatModal } from '@/components/modals/NegotiationChatModal';
@@ -38,6 +38,16 @@ export const DriverHome = () => {
   const simStepRef = useRef(0);
   const lastLocationRef = useRef<LocationPoint | null>(currentLocation);
   const isAcceptingRef = useRef(false);
+  const driverStateRef = useRef(driverState);
+  const activeTripRef = useRef(activeTrip);
+  const pendingRequestRef = useRef(pendingRequest);
+  const lastAlertedRideIdRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    driverStateRef.current = driverState;
+    activeTripRef.current = activeTrip;
+    pendingRequestRef.current = pendingRequest;
+  }, [driverState, activeTrip, pendingRequest]);
 
   // Rejected ride IDs for this driver session (en caso de ser rechazado, no volver a mostrar al mismo conductor)
   const [rejectedRideIds, setRejectedRideIds] = useState<string[]>(() => {
@@ -212,65 +222,97 @@ export const DriverHome = () => {
   // Subscribe to active trip updates (e.g. negotiation, payment, fare updates, or cancellation)
   useEffect(() => {
     if (!activeTrip?.id) return;
-    const unsubscribe = apiService.subscribeToRide(activeTrip.id, (rideData) => {
+    const tripId = activeTrip.id;
+
+    const unsubscribe = apiService.subscribeToRide(tripId, (rideData) => {
       if (!rideData) return;
 
-      // Si el viaje fue cancelado o autodestruido de active_requests
+      // Si el viaje fue cancelado o autodestruido
       if (rideData.status === 'CANCELLED') {
         haptics.error();
         setDriverState('ONLINE');
         setActiveTrip(null);
         setPendingRequest(null);
+        lastAlertedRideIdRef.current = null;
         return;
       }
 
-      if (rideData.status === 'GOING_TO_PASSENGER' && driverState === 'NEGOTIATING') {
+      if (rideData.status === 'GOING_TO_PASSENGER' && driverStateRef.current === 'NEGOTIATING') {
         setDriverState('GOING_TO_PASSENGER');
       }
 
-      if (rideData.status === 'SEARCHING_DRIVER' && driverState === 'NEGOTIATING') {
-        // Negotiation cancelled / released
-        setDriverState('ONLINE');
-        setActiveTrip(null);
-        return;
+      // Si la negociación fue liberada o cancelada por el pasajero:
+      // Solo regresar a ONLINE si el viaje ya no nos corresponde (sin chofer o con otro chofer)
+      if (rideData.status === 'SEARCHING_DRIVER') {
+        if (!rideData.driverId || (rideData.driverId && rideData.driverId !== driverId)) {
+          setDriverState('ONLINE');
+          setActiveTrip(null);
+          lastAlertedRideIdRef.current = null;
+          return;
+        }
       }
 
       setActiveTrip({
-        ...(activeTrip || {}),
+        ...(activeTripRef.current || {}),
         ...rideData,
-      });
+      } as any);
     });
     return () => unsubscribe();
-  }, [activeTrip?.id, driverState, setDriverState, setActiveTrip]);
+  }, [activeTrip?.id, driverId, setDriverState, setActiveTrip]);
 
-  // Subscribe to real-time pending ride requests in Firestore & RealtimeSyncBus when ONLINE or viewing RIDE_REQUEST
+  // Subscribe to real-time pending ride requests in Firestore & RealtimeSyncBus while ONLINE
   useEffect(() => {
-    if (driverState !== 'ONLINE' && driverState !== 'RIDE_REQUEST') return;
+    if (!isOnline) {
+      lastAlertedRideIdRef.current = null;
+      return;
+    }
 
     const unsubscribe = apiService.subscribeToPendingRides((pendingRides) => {
       // Filtrar solicitudes que este chofer específico ya rechazó
-      const availableRides = pendingRides.filter((r) => !rejectedRideIds.includes(r.id));
+      let rejected: string[] = [];
+      try {
+        const raw = sessionStorage.getItem('ribergo_rejected_rides');
+        if (raw) rejected = JSON.parse(raw);
+      } catch (e) {}
+      const allRejected = Array.from(new Set([...rejectedRideIds, ...rejected]));
+      const availableRides = pendingRides.filter((r) => !allRejected.includes(r.id));
 
-      // Si el chofer está en la tarjeta de solicitud entrante pero el pasajero canceló la búsqueda (autodestrucción en Firestore)
-      if (driverState === 'RIDE_REQUEST' && !isAcceptingRef.current) {
-        const stillPending = pendingRides.some((r) => r.id === pendingRequest?.id);
-        if (!stillPending) {
-          // Solicitud esfumada inmediatamente
+      const currentState = driverStateRef.current;
+      const currentActiveTrip = activeTripRef.current;
+      const currentPending = pendingRequestRef.current;
+
+      // Solo ignorar si el conductor ya tiene un viaje activo en curso
+      const isTripOngoing = currentActiveTrip && (
+        currentActiveTrip.status === 'NEGOTIATING' || 
+        currentActiveTrip.status === 'GOING_TO_PASSENGER' || 
+        currentActiveTrip.status === 'TRIP_STARTED'
+      );
+
+      if (isTripOngoing) {
+        lastAlertedRideIdRef.current = null;
+        return;
+      }
+
+      // Si el chofer está en la tarjeta de solicitud entrante pero el viaje fue tomado por otro o cancelado
+      if (currentState === 'RIDE_REQUEST' && currentPending && !isAcceptingRef.current) {
+        const stillInAvailable = availableRides.some((r) => r.id === currentPending.id);
+        if (!stillInAvailable && availableRides.length > 0) {
           setPendingRequest(null);
           setDriverState('ONLINE');
+          lastAlertedRideIdRef.current = null;
         }
         return;
       }
 
-      // Solo ignorar si el conductor ya tiene un viaje activo en curso
-      const isTripOngoing = activeTrip && (
-        activeTrip.status === 'NEGOTIATING' || 
-        activeTrip.status === 'GOING_TO_PASSENGER' || 
-        activeTrip.status === 'TRIP_STARTED'
-      );
-
-      if (availableRides.length > 0 && !isTripOngoing && driverState === 'ONLINE') {
+      if (availableRides.length > 0 && currentState === 'ONLINE') {
         const req = availableRides[0];
+
+        // Anti-loop: si ya alertó esta misma solicitud, no volver a disparar audio ni reiniciar countdown
+        if (lastAlertedRideIdRef.current === req.id && currentPending?.id === req.id) {
+          return;
+        }
+
+        lastAlertedRideIdRef.current = req.id;
         setPendingRequest({
           id: req.id,
           pickup: req.pickup,
@@ -292,7 +334,7 @@ export const DriverHome = () => {
     });
 
     return () => unsubscribe();
-  }, [driverState, activeTrip?.status, pendingRequest?.id, rejectedRideIds, setPendingRequest, setDriverState]);
+  }, [isOnline, rejectedRideIds, setPendingRequest, setDriverState]);
 
   // Request countdown timer with sound & haptic alerts
   useEffect(() => {
@@ -300,9 +342,10 @@ export const DriverHome = () => {
       const interval = setInterval(() => {
         setCountdown((prev) => {
           if (prev <= 1) {
-            if (pendingRequest?.id) {
-              markRideAsRejected(pendingRequest.id);
+            if (pendingRequestRef.current?.id) {
+              markRideAsRejected(pendingRequestRef.current.id);
             }
+            lastAlertedRideIdRef.current = null;
             setDriverState('ONLINE');
             setPendingRequest(null);
             return 15;
@@ -323,7 +366,7 @@ export const DriverHome = () => {
 
       return () => clearInterval(interval);
     }
-  }, [driverState, pendingRequest?.id, setDriverState, setPendingRequest]);
+  }, [driverState, setDriverState, setPendingRequest]);
 
   const handleAcceptRequest = async () => {
     if (!pendingRequest || isAcceptingRef.current) return;
@@ -344,18 +387,33 @@ export const DriverHome = () => {
       currentLocation: currentLocation || { lat: -11.0061, lng: -66.0747 },
     };
 
-    // 1. Inmediatamente fijar estado NEGOTIATING (0ms) para abrir el chat del chofer sin demoras
-    setDriverState('NEGOTIATING');
-    setActiveTrip({
+    const updatedRide = {
       ...rideToAccept,
       status: 'NEGOTIATING',
+      driverId: driverData.id,
+      driverName: driverData.name,
+      driverPhone: driverData.phone,
+      driverRating: driverData.rating,
+      motorcycle: driverData.motorcycle,
+      plate: driverData.plate,
       driver: driverData,
-    });
-    setPendingRequest(null);
+      acceptedAtMs: Date.now(),
+    };
 
-    // 2. Persistir en Firestore de fondo
+    // 1. Guardar de inmediato en el bus local ANTES de renderizar el chat para evitar lecturas de SEARCHING_DRIVER
+    realtimeSyncBus.saveRide(updatedRide);
+
+    // 2. Fijar estado en store (0ms)
+    setActiveTrip(updatedRide);
+    setDriverState('NEGOTIATING');
+    setPendingRequest(null);
+    lastAlertedRideIdRef.current = null;
+
+    // 3. Persistir en Firestore de fondo
     try {
       await apiService.acceptRide(rideToAccept.id, driverData);
+    } catch (err) {
+      console.warn('Error accepting ride:', err);
     } finally {
       isAcceptingRef.current = false;
     }
@@ -366,6 +424,7 @@ export const DriverHome = () => {
     if (pendingRequest?.id) {
       markRideAsRejected(pendingRequest.id);
     }
+    lastAlertedRideIdRef.current = null;
     setPendingRequest(null);
     setDriverState('ONLINE');
   };

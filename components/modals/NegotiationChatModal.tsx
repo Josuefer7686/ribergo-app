@@ -224,6 +224,18 @@ export const NegotiationChatModal = () => {
     haptics.error();
     const currentRideId = rideId;
 
+    // Si es conductor el que abandona la negociación, marcar el viaje como rechazado para no volver a recibirlo
+    if (!isPassenger) {
+      try {
+        const raw = sessionStorage.getItem('ribergo_rejected_rides');
+        const list = raw ? JSON.parse(raw) : [];
+        if (!list.includes(currentRideId)) {
+          list.push(currentRideId);
+          sessionStorage.setItem('ribergo_rejected_rides', JSON.stringify(list));
+        }
+      } catch (e) {}
+    }
+
     // 1. Optimistic UI: salir de negociación en 0ms
     if (isPassenger) {
       setPassengerState('SEARCHING_DRIVER');
