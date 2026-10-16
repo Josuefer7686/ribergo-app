@@ -11,7 +11,6 @@ import { MessagesView } from '@/components/views/MessagesView';
 import { IncomeView } from '@/components/views/IncomeView';
 import { IosMessageToast, ToastMessageData } from '@/components/shared/IosMessageToast';
 import { IosLocationPermissionModal } from '@/components/modals/IosLocationPermissionModal';
-import { SmartPwaInstallModal } from '@/components/modals/SmartPwaInstallModal';
 import { useAutoLocation } from '@/hooks/useAutoLocation';
 import { apiService } from '@/services/apiService';
 
@@ -81,9 +80,6 @@ export function MainAppView() {
 
   return (
     <div className="flex flex-col h-full w-full relative overflow-hidden bg-background">
-      {/* Smart PWA Installation Detector Modal (Runs when opened in web browser) */}
-      <SmartPwaInstallModal />
-
       {/* Floating iOS 18 Dynamic Island Message Toast Banner */}
       <IosMessageToast
         toast={isInsideChat ? null : activeToast}

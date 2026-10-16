@@ -2,11 +2,13 @@
 
 import { useEffect, useState } from 'react';
 import { useAppStore } from '@/store/useAppStore';
+import { usePwa } from '@/utils/pwa';
 import { Download, Smartphone, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
 export const PwaInstallBanner = () => {
   const { deferredPwaPrompt, setDeferredPwaPrompt } = useAppStore();
+  const { isStandalone } = usePwa();
   const [dismissed, setDismissed] = useState(false);
 
   useEffect(() => {
@@ -33,7 +35,7 @@ export const PwaInstallBanner = () => {
     }
   };
 
-  if (dismissed) return null;
+  if (dismissed || isStandalone) return null;
 
   return (
     <AnimatePresence>

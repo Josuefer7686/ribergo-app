@@ -305,6 +305,13 @@ class AudioSynthesizer {
     osc.start(now);
     osc.stop(now + 0.04);
   }
+
+  /**
+   * Crisp UI Bubble / Tab Click Pop
+   */
+  tabClick() {
+    this.keyTick();
+  }
 }
 
 export const audio = new AudioSynthesizer();

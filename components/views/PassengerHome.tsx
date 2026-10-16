@@ -74,7 +74,8 @@ export const PassengerHome = () => {
         initialPrice,
         passengerId,
         passengerName,
-        'CASH'
+        'CASH',
+        user?.phone || '+591 70000000'
       );
       setActiveTrip(trip);
     } catch (err) {
@@ -184,7 +185,8 @@ export const PassengerHome = () => {
         finalFare, 
         passengerId, 
         passengerName,
-        selectedPaymentMethod
+        selectedPaymentMethod,
+        user?.phone || '+591 70000000'
       );
       setActiveTrip(trip);
     } catch (err) {

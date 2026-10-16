@@ -7,18 +7,14 @@ import { haptics } from '@/utils/haptics';
 import { audio } from '@/utils/audio';
 import { useAppStore } from '@/store/useAppStore';
 
+import { usePwa, checkIsPwaStandalone } from '@/utils/pwa';
+
 export const SmartPwaInstallModal = () => {
   const { showPwaModal, setShowPwaModal } = useAppStore();
+  const { isStandalone } = usePwa();
   const [deferredPrompt, setDeferredPrompt] = useState<any>(() => {
     if (typeof window !== 'undefined') return (window as any).deferredPwaPrompt || null;
     return null;
-  });
-  const [isStandalone, setIsStandalone] = useState<boolean>(() => {
-    if (typeof window === 'undefined') return true;
-    const isStandaloneMedia = window.matchMedia('(display-mode: standalone)').matches;
-    const isNavStandalone = (navigator as any).standalone === true;
-    const isAndroidApp = document.referrer.includes('android-app://');
-    return isStandaloneMedia || isNavStandalone || isAndroidApp;
   });
   const [dontShowAgain, setDontShowAgain] = useState(false);
   const [platform] = useState<'ANDROID' | 'IOS' | 'DESKTOP'>(() => {
@@ -28,6 +24,13 @@ export const SmartPwaInstallModal = () => {
     if (/android/i.test(ua)) return 'ANDROID';
     return 'DESKTOP';
   });
+
+  // If app is already installed or running in standalone mode, NEVER show modal
+  useEffect(() => {
+    if (isStandalone && showPwaModal) {
+      setShowPwaModal(false);
+    }
+  }, [isStandalone, showPwaModal, setShowPwaModal]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -41,20 +44,23 @@ export const SmartPwaInstallModal = () => {
 
     window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
 
-    // Auto-Open Trigger Logic (Spy / Espía)
+    // Auto-Open Trigger Logic (Only for standard web browsers, never inside installed PWA)
     const hidePreference = localStorage.getItem('ribergo_hide_install_prompt') === 'true';
     if (!isStandalone && !hidePreference) {
       const timer = setTimeout(() => {
-        setShowPwaModal(true);
-        try { audio.messageReceived(); } catch(e) {}
-      }, 2500); // 2.5s delay allows splash screen and main map to load fully
+        // Double check standalone status before popping up
+        if (!checkIsPwaStandalone()) {
+          setShowPwaModal(true);
+          try { audio.messageReceived(); } catch(e) {}
+        }
+      }, 3500); // 3.5s delay allows splash and map to render completely
       return () => clearTimeout(timer);
     }
 
     return () => {
       window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
     };
-  }, [setShowPwaModal, isStandalone]);;
+  }, [setShowPwaModal, isStandalone]);
 
   const handleClose = () => {
     haptics.selection();
@@ -71,23 +77,21 @@ export const SmartPwaInstallModal = () => {
       deferredPrompt.prompt();
       const choiceResult = await deferredPrompt.userChoice;
       if (choiceResult.outcome === 'accepted') {
-        setIsStandalone(true);
+        localStorage.setItem('ribergo_is_installed_pwa', 'true');
+        localStorage.setItem('ribergo_hide_install_prompt', 'true');
         setShowPwaModal(false);
       }
       setDeferredPrompt(null);
     } else {
       haptics.notification();
-      if (platform === 'IOS' || platform === 'ANDROID') {
-        // If they click install but no deferred prompt, maybe just jiggle the UI to show instructions
-        // Not much else to do natively, instructions are already visible!
-      } else {
-         setShowPwaModal(false);
+      if (platform !== 'IOS' && platform !== 'ANDROID') {
+        setShowPwaModal(false);
       }
     }
   };
 
   // If app is already installed/standalone and modal wasn't explicitly forced open, render nothing.
-  if (isStandalone && !showPwaModal) return null;
+  if (isStandalone) return null;
 
   return (
     <AnimatePresence>

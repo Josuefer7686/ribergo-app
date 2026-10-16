@@ -40,13 +40,14 @@ const formatAuthIdentifier = (identifier: string): string => {
 // ============================================================================
 
 interface SyncEvent {
-  type: 'RIDE_REQUESTED' | 'RIDE_UPDATED' | 'RIDE_CANCELLED' | 'CHAT_MESSAGE';
+  type: 'RIDE_REQUESTED' | 'RIDE_UPDATED' | 'RIDE_CANCELLED' | 'CHAT_MESSAGE' | 'DRIVER_ONLINE_UPDATED' | 'DRIVER_OFFLINE';
   payload: any;
   timestamp: number;
 }
 
 const RIDES_STORAGE_KEY = 'ribergo_active_rides_cache_v3';
 const CHAT_STORAGE_KEY_PREFIX = 'ribergo_chat_cache_v3_';
+const DRIVERS_STORAGE_KEY = 'ribergo_online_drivers_cache_v3';
 const CHANNEL_NAME = 'ribergo_realtime_sync_channel';
 
 class RealtimeSyncBus {
@@ -54,6 +55,7 @@ class RealtimeSyncBus {
   private pendingRidesListeners: Set<(rides: any[]) => void> = new Set();
   private rideListeners: Map<string, Set<(ride: any) => void>> = new Map();
   private messageListeners: Map<string, Set<(messages: any[]) => void>> = new Map();
+  private driversListeners: Set<(drivers: DriverData[]) => void> = new Set();
 
   constructor() {
     if (typeof window !== 'undefined') {
@@ -83,6 +85,9 @@ class RealtimeSyncBus {
           const rId = e.key.replace(CHAT_STORAGE_KEY_PREFIX, '');
           this.notifyMessages(rId);
         }
+        if (e.key === DRIVERS_STORAGE_KEY) {
+          this.notifyDrivers();
+        }
       });
     }
   }
@@ -99,6 +104,8 @@ class RealtimeSyncBus {
       if (event.payload?.rideId) {
         this.notifyMessages(event.payload.rideId);
       }
+    } else if (event.type === 'DRIVER_ONLINE_UPDATED' || event.type === 'DRIVER_OFFLINE') {
+      this.notifyDrivers();
     }
   }
 
@@ -258,6 +265,83 @@ class RealtimeSyncBus {
         try { cb(msgs); } catch (e) {}
       });
     }
+  }
+
+  // --- Real-time Driver Online & GPS Location Tracking Sync ---
+  public getActiveDrivers(): DriverData[] {
+    if (typeof window === 'undefined') return [];
+    try {
+      const raw = localStorage.getItem(DRIVERS_STORAGE_KEY);
+      if (!raw) return [];
+      const drivers = JSON.parse(raw) as DriverData[];
+      return drivers;
+    } catch (e) {
+      return [];
+    }
+  }
+
+  public saveDriver(driver: DriverData) {
+    if (typeof window === 'undefined') return;
+    try {
+      const drivers = this.getActiveDrivers();
+      const idx = drivers.findIndex(d => d.id === driver.id);
+      if (idx >= 0) {
+        drivers[idx] = { ...drivers[idx], ...driver };
+      } else {
+        drivers.push(driver);
+      }
+      localStorage.setItem(DRIVERS_STORAGE_KEY, JSON.stringify(drivers));
+      this.notifyDrivers();
+      this.broadcast({ type: 'DRIVER_ONLINE_UPDATED', payload: driver, timestamp: Date.now() });
+    } catch (e) {}
+  }
+
+  public updateDriverLocation(driverId: string, location: LocationPoint, heading: number = 0, speed: number = 0) {
+    if (typeof window === 'undefined') return;
+    try {
+      const drivers = this.getActiveDrivers();
+      const idx = drivers.findIndex(d => d.id === driverId);
+      if (idx >= 0) {
+        drivers[idx] = {
+          ...drivers[idx],
+          currentLocation: location,
+          heading,
+          speed,
+        };
+        localStorage.setItem(DRIVERS_STORAGE_KEY, JSON.stringify(drivers));
+        this.notifyDrivers();
+        this.broadcast({ 
+          type: 'DRIVER_ONLINE_UPDATED', 
+          payload: drivers[idx], 
+          timestamp: Date.now() 
+        });
+      }
+    } catch (e) {}
+  }
+
+  public removeDriver(driverId: string) {
+    if (typeof window === 'undefined') return;
+    try {
+      const drivers = this.getActiveDrivers().filter(d => d.id !== driverId);
+      localStorage.setItem(DRIVERS_STORAGE_KEY, JSON.stringify(drivers));
+      this.notifyDrivers();
+      this.broadcast({ type: 'DRIVER_OFFLINE', payload: { id: driverId }, timestamp: Date.now() });
+    } catch (e) {}
+  }
+
+  public subscribeDrivers(callback: (drivers: DriverData[]) => void): () => void {
+    this.driversListeners.add(callback);
+    callback(this.getActiveDrivers());
+    return () => {
+      this.driversListeners.delete(callback);
+    };
+  }
+
+  public notifyDrivers() {
+    const drivers = this.getActiveDrivers();
+    this.driversListeners.forEach(cb => {
+      try { cb(drivers); } catch (e) {}
+    });
   }
 }
 
@@ -551,7 +635,7 @@ export const apiService = {
   },
 
   /**
-   * Set driver online / offline status in Cloud Firestore 'online_drivers' collection
+   * Set driver online / offline status in RealtimeSyncBus & Cloud Firestore 'online_drivers' collection
    */
   async setDriverOnlineStatus(
     driverId: string, 
@@ -561,20 +645,36 @@ export const apiService = {
     plate: string, 
     rating: number, 
     location: LocationPoint, 
-    isOnline: boolean
+    isOnline: boolean,
+    heading: number = 0,
+    speed: number = 0
   ) {
+    const driverData: DriverData = {
+      id: driverId,
+      name: driverName || 'Mototaxi Riberalta',
+      phone: phone || '+591 70000000',
+      rating: rating || 5.0,
+      trips: 12,
+      avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=150&q=80',
+      motorcycle: motorcycle || 'Honda Wave 110',
+      plate: plate || 'RBT-100',
+      currentLocation: location,
+      heading,
+      speed,
+    };
+
+    if (isOnline) {
+      realtimeSyncBus.saveDriver(driverData);
+    } else {
+      realtimeSyncBus.removeDriver(driverId);
+    }
+
     if (isFirebaseConfigured()) {
       try {
         const driverDocRef = doc(db, 'online_drivers', driverId);
         if (isOnline) {
           await setDoc(driverDocRef, {
-            id: driverId,
-            name: driverName,
-            phone,
-            motorcycle: motorcycle || 'Honda Wave 110',
-            plate: plate || 'RBT-100',
-            rating: rating || 5.0,
-            currentLocation: location,
+            ...driverData,
             lastActive: serverTimestamp(),
           });
         } else {
@@ -588,37 +688,83 @@ export const apiService = {
   },
 
   /**
-   * Listen to real-time online drivers on the Riberalta map
+   * Update real-time GPS coordinates and heading direction of an online driver
+   */
+  async updateDriverLocation(
+    driverId: string,
+    location: LocationPoint,
+    heading: number = 0,
+    speed: number = 0
+  ) {
+    // 1. Broadcast immediately to RealtimeSyncBus for 0ms multi-tab/local reflection
+    realtimeSyncBus.updateDriverLocation(driverId, location, heading, speed);
+
+    // 2. Sync to Cloud Firestore if available
+    if (isFirebaseConfigured()) {
+      try {
+        const driverDocRef = doc(db, 'online_drivers', driverId);
+        await setDoc(driverDocRef, {
+          currentLocation: location,
+          heading,
+          speed,
+          lastActive: serverTimestamp(),
+        }, { merge: true });
+      } catch (err) {}
+    }
+  },
+
+  /**
+   * Listen to real-time online drivers on the Riberalta map (Hybrid SyncBus + Firestore)
    */
   subscribeToOnlineDrivers(callback: (drivers: DriverData[]) => void) {
+    // 1. Listen to Local RealtimeSyncBus
+    const unsubLocal = realtimeSyncBus.subscribeDrivers((localDrivers) => {
+      callback(localDrivers);
+    });
+
+    // 2. Listen to Cloud Firestore if configured and merge
+    let unsubFirestore = () => {};
     if (isFirebaseConfigured()) {
-      return onSnapshot(
-        collection(db, 'online_drivers'),
-        (snapshot) => {
-          const drivers = snapshot.docs.map((docSnap) => {
-            const data = docSnap.data();
-            return {
-              id: docSnap.id,
-              name: data.name || 'Mototaxi Riberalta',
-              phone: data.phone || '+591 70000000',
-              rating: data.rating || 5.0,
-              trips: data.trips || 12,
-              avatar: data.avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=150&q=80',
-              motorcycle: data.motorcycle || 'Honda Wave 110',
-              plate: data.plate || 'RBT-100',
-              currentLocation: data.currentLocation || { lat: -11.0061, lng: -66.0747 },
-            } as DriverData;
-          });
-          callback(drivers);
-        },
-        (err) => {
-          console.warn('Firestore online_drivers listener permission error:', err?.message || err);
-          callback([]);
-        }
-      );
+      try {
+        unsubFirestore = onSnapshot(
+          collection(db, 'online_drivers'),
+          (snapshot) => {
+            const firestoreDrivers = snapshot.docs.map((docSnap) => {
+              const data = docSnap.data();
+              return {
+                id: docSnap.id,
+                name: data.name || 'Mototaxi Riberalta',
+                phone: data.phone || '+591 70000000',
+                rating: data.rating || 5.0,
+                trips: data.trips || 12,
+                avatar: data.avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=150&q=80',
+                motorcycle: data.motorcycle || 'Honda Wave 110',
+                plate: data.plate || 'RBT-100',
+                currentLocation: data.currentLocation || { lat: -11.0061, lng: -66.0747 },
+                heading: data.heading || 0,
+                speed: data.speed || 0,
+              } as DriverData;
+            });
+
+            // Merge local and firestore drivers so there are no duplicates
+            const localDrivers = realtimeSyncBus.getActiveDrivers();
+            const driverMap = new Map<string, DriverData>();
+            for (const d of localDrivers) driverMap.set(d.id, d);
+            for (const d of firestoreDrivers) driverMap.set(d.id, d);
+
+            callback(Array.from(driverMap.values()));
+          },
+          (err) => {
+            console.warn('Firestore online_drivers listener permission error:', err?.message || err);
+          }
+        );
+      } catch (e) {}
     }
-    callback([]);
-    return () => {};
+
+    return () => {
+      unsubLocal();
+      unsubFirestore();
+    };
   },
 
 
@@ -632,7 +778,8 @@ export const apiService = {
     price: number, 
     passengerId: string, 
     passengerName: string,
-    paymentMethod: 'CASH' | 'QR' = 'CASH'
+    paymentMethod: 'CASH' | 'QR' = 'CASH',
+    passengerPhone?: string
   ): Promise<ActiveTripInfo> {
     const rideId = 'ride-' + Date.now();
     const nowMs = Date.now();
@@ -646,6 +793,7 @@ export const apiService = {
       durationMin: 6,
       passengerId,
       passengerName,
+      passengerPhone: passengerPhone || '+591 70000000',
       paymentMethod,
       paymentStatus: 'PENDING',
       status: 'SEARCHING_DRIVER',
@@ -658,7 +806,7 @@ export const apiService = {
       createdAtMs: nowMs,
     });
 
-    // 2. Persistir en la colección efímera 'active_requests' en Cloud Firestore
+    // 2. Persistir en la colección 'rides' en Cloud Firestore (100% autorizada y en tiempo real)
     if (isFirebaseConfigured()) {
       try {
         const payload = {
@@ -667,12 +815,12 @@ export const apiService = {
           createdAtMs: nowMs,
           createdAt: serverTimestamp(),
         };
-        // Guardar en active_requests (cola en vivo)
-        setDoc(doc(db, 'active_requests', rideId), payload).catch((err) => {
-          console.warn('Firestore active_requests setDoc background error:', err?.message || err);
+        // 1. Guardar en 'rides' (colección principal autorizada en Firestore)
+        await setDoc(doc(db, 'rides', rideId), payload).catch((err) => {
+          console.error('Firestore rides setDoc error:', err);
         });
-        // Y en rides por respaldo
-        setDoc(doc(db, 'rides', rideId), payload).catch(() => {});
+        // 2. Espejo opcional en 'active_requests'
+        setDoc(doc(db, 'active_requests', rideId), payload).catch(() => {});
       } catch (err) {
         console.warn('Firestore Request Ride Error:', err);
       }
@@ -682,7 +830,7 @@ export const apiService = {
   },
 
   /**
-   * Cancel and AUTODESTROY a ride request completely from active_requests
+   * Cancel and AUTODESTROY a ride request completely from Firestore
    * (No deja rastros ni viajes fantasmas en la base de datos)
    */
   async cancelRideRequest(rideId: string) {
@@ -694,9 +842,11 @@ export const apiService = {
     // 2. Autodestruir físicamente el documento en Cloud Firestore
     if (isFirebaseConfigured()) {
       try {
-        const { deleteDoc } = await import('firebase/firestore');
-        await deleteDoc(doc(db, 'active_requests', rideId)).catch(() => {});
+        const { deleteDoc, updateDoc } = await import('firebase/firestore');
+        // Notificar primero estado CANCELLED para que los observadores activos reaccionen de inmediato
+        await updateDoc(doc(db, 'rides', rideId), { status: 'CANCELLED' }).catch(() => {});
         await deleteDoc(doc(db, 'rides', rideId)).catch(() => {});
+        await deleteDoc(doc(db, 'active_requests', rideId)).catch(() => {});
       } catch (err) {
         console.warn('Firestore autodestroy error:', err);
       }
@@ -704,7 +854,7 @@ export const apiService = {
   },
 
   /**
-   * Complete trip, save permanent forensic record to 'trips_history' and AUTODESTROY from active_requests
+   * Complete trip, save permanent forensic record to 'trips_history' and AUTODESTROY from rides
    */
   async finishTripAndArchive(rideId: string, tripSummary: any) {
     if (!rideId) return;
@@ -718,32 +868,32 @@ export const apiService = {
           status: 'COMPLETED',
           completedAtMs: Date.now(),
           completedAt: serverTimestamp(),
-        });
+        }).catch(() => {});
       } catch (err) {
         console.warn('Error saving to trips_history:', err);
       }
     }
 
-    // 2. Autodestruir de la cola en vivo 'active_requests'
+    // 2. Autodestruir de la cola en vivo 'rides'
     await this.cancelRideRequest(rideId);
   },
 
   /**
-   * Listen to real-time updates for a specific ride (active_requests + bus)
+   * Listen to real-time updates for a specific ride (rides collection + bus)
    */
   subscribeToRide(rideId: string, callback: (ride: any) => void) {
     // 1. Suscribirse inmediatamente a RealtimeSyncBus
     const unsubBus = realtimeSyncBus.subscribeRide(rideId, callback);
 
-    // 2. Suscribirse a Firestore si está disponible
+    // 2. Suscribirse a Firestore en la colección autorizada 'rides'
     let unsubFirestore = () => {};
     if (isFirebaseConfigured()) {
       try {
         unsubFirestore = onSnapshot(
-          doc(db, 'active_requests', rideId),
+          doc(db, 'rides', rideId),
           (snapshot) => {
             if (snapshot.exists()) {
-              const data = snapshot.data();
+              const data = { id: snapshot.id, ...snapshot.data() };
               realtimeSyncBus.saveRide(data);
               callback(data);
             } else {
@@ -752,7 +902,7 @@ export const apiService = {
             }
           },
           (err) => {
-            console.warn('Firestore active_requests ride listener error:', err?.message || err);
+            console.warn('Firestore rides listener error:', err?.message || err);
           }
         );
       } catch (e) {
@@ -767,51 +917,70 @@ export const apiService = {
   },
 
   /**
-   * Listen to pending ride requests for online drivers (Escucha directa a active_requests en tiempo real)
+   * Listen to pending ride requests for online drivers (Hybrid RealtimeSyncBus + Firestore 'rides' collection)
    */
   subscribeToPendingRides(callback: (rides: any[]) => void) {
+    const notifyCombined = (firestoreRides: any[] = []) => {
+      const busRides = realtimeSyncBus.getPendingRides();
+      const rideMap = new Map<string, any>();
+
+      // 1. Añadir viajes locales del bus
+      for (const r of busRides) {
+        rideMap.set(r.id, r);
+      }
+
+      // 2. Añadir y fusionar viajes de Firestore
+      for (const r of firestoreRides) {
+        rideMap.set(r.id, r);
+        realtimeSyncBus.saveRide(r);
+      }
+
+      // 3. Filtrar estrictamente solicitudes buscando conductor, sin chofer asignado y vigentes (< 20 min)
+      const now = Date.now();
+      const validPending = Array.from(rideMap.values()).filter(r => {
+        if (r.status !== 'SEARCHING_DRIVER') return false;
+        if (r.driverId) return false;
+        const timeVal = r.createdAtMs || (typeof r.createdAt?.toMillis === 'function' ? r.createdAt.toMillis() : (r.createdAt?.seconds ? r.createdAt.seconds * 1000 : 0));
+        const age = now - (timeVal || 0);
+        if (timeVal && age > 20 * 60 * 1000) return false;
+        return true;
+      }).sort((a, b) => {
+        const timeA = a.createdAtMs || (typeof a.createdAt?.toMillis === 'function' ? a.createdAt.toMillis() : (a.createdAt?.seconds ? a.createdAt.seconds * 1000 : 0));
+        const timeB = b.createdAtMs || (typeof b.createdAt?.toMillis === 'function' ? b.createdAt.toMillis() : (b.createdAt?.seconds ? b.createdAt.seconds * 1000 : 0));
+        return timeB - timeA;
+      });
+
+      callback(validPending);
+    };
+
     // 1. Suscribirse inmediatamente a RealtimeSyncBus (0ms)
-    const unsubBus = realtimeSyncBus.subscribePendingRides((busPending) => {
-      callback(busPending);
+    const unsubBus = realtimeSyncBus.subscribePendingRides(() => {
+      notifyCombined();
     });
 
-    // 2. Suscribirse a la colección efímera 'active_requests' en Firestore
+    // 2. Suscribirse a la colección 'rides' en Firestore en tiempo real
     let unsubFirestore = () => {};
     if (isFirebaseConfigured()) {
       try {
         unsubFirestore = onSnapshot(
-          collection(db, 'active_requests'),
+          collection(db, 'rides'),
           (snapshot) => {
             const freshPendingRides = snapshot.docs
               .map(docSnap => ({
                 id: docSnap.id,
                 ...docSnap.data()
               } as any))
-              .filter(r => {
-                // Solo solicitudes buscando conductor y sin chofer asignado
-                if (r.status !== 'SEARCHING_DRIVER') return false;
-                if (r.driverId) return false;
-                // Descartar si tuviera más de 5 minutos
-                const age = Date.now() - (r.createdAtMs || 0);
-                if (r.createdAtMs && age > 5 * 60 * 1000) return false;
-                return true;
-              })
-              .sort((a, b) => {
-                const timeA = a.createdAtMs || (a.createdAt?.toMillis ? a.createdAt.toMillis() : 0);
-                const timeB = b.createdAtMs || (b.createdAt?.toMillis ? b.createdAt.toMillis() : 0);
-                return timeB - timeA;
-              });
+              .filter(r => r.status === 'SEARCHING_DRIVER' && !r.driverId);
 
-            // Sincronizar hacia RealtimeSyncBus y notificar choferes
-            freshPendingRides.forEach(r => realtimeSyncBus.saveRide(r));
-            callback(freshPendingRides);
+            notifyCombined(freshPendingRides);
           },
           (err) => {
-            console.warn('Firestore active_requests listener notice (usando bus local):', err?.message || err);
+            console.warn('Firestore rides listener notice (usando bus local):', err?.message || err);
+            notifyCombined();
           }
         );
       } catch (e) {
-        console.warn('Firestore active_requests query error:', e);
+        console.warn('Firestore rides query error:', e);
       }
     }
 

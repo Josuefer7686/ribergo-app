@@ -1,14 +1,15 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { useAppStore } from '@/store/useAppStore';
+import { useState, useEffect, useRef } from 'react';
+import { useAppStore, LocationPoint } from '@/store/useAppStore';
 import { MapView } from '@/components/map/MapView';
 import { 
-  Power, Navigation, MapPin, MessageSquare, Check, X, Clock, DollarSign, User, Bike, ChevronRight, AlertCircle, QrCode 
+  Power, Navigation, MapPin, MessageSquare, Check, X, Clock, DollarSign, User, Bike, ChevronRight, AlertCircle, QrCode, Sparkles 
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { haptics } from '@/utils/haptics';
 import { audio } from '@/utils/audio';
+import { calculateBearing, calculateDistanceMeters } from '@/utils/geo';
 
 import { apiService } from '@/services/apiService';
 import { DriverWalletTutorialModal } from '@/components/modals/DriverWalletTutorialModal';
@@ -17,7 +18,7 @@ import { NegotiationChatModal } from '@/components/modals/NegotiationChatModal';
 
 export const DriverHome = () => {
   const { 
-    user, currentLocation,
+    user, currentLocation, setCurrentLocation,
     driverState, setDriverState, 
     pendingRequest, setPendingRequest,
     activeTrip, setActiveTrip,
@@ -32,6 +33,32 @@ export const DriverHome = () => {
   });
   const [showQrModal, setShowQrModal] = useState(false);
   const [lowBalanceBanner, setLowBalanceBanner] = useState(false);
+  const [isSimulatingMotion, setIsSimulatingMotion] = useState(false);
+
+  const simStepRef = useRef(0);
+  const lastLocationRef = useRef<LocationPoint | null>(currentLocation);
+
+  // Rejected ride IDs for this driver session (en caso de ser rechazado, no volver a mostrar al mismo conductor)
+  const [rejectedRideIds, setRejectedRideIds] = useState<string[]>(() => {
+    if (typeof window === 'undefined') return [];
+    try {
+      const raw = sessionStorage.getItem('ribergo_rejected_rides');
+      return raw ? JSON.parse(raw) : [];
+    } catch (e) {
+      return [];
+    }
+  });
+
+  const markRideAsRejected = (rideId: string) => {
+    setRejectedRideIds((prev) => {
+      if (prev.includes(rideId)) return prev;
+      const updated = [...prev, rideId];
+      try {
+        sessionStorage.setItem('ribergo_rejected_rides', JSON.stringify(updated));
+      } catch (e) {}
+      return updated;
+    });
+  };
 
   const isOnline = driverState !== 'OFFLINE';
   const walletBalance = user?.walletBalance ?? 0.0;
@@ -88,9 +115,10 @@ export const DriverHome = () => {
       setPendingRequest(null);
       setDriverState('ONLINE');
       await apiService.setDriverOnlineStatus(
-        driverId, driverName, driverPhone, motorcycle, plate, 5.0, loc, true
+        driverId, driverName, driverPhone, motorcycle, plate, 5.0, loc, true, 0, 0
       );
     } else {
+      setIsSimulatingMotion(false);
       setDriverState('OFFLINE');
       setPendingRequest(null);
       await apiService.setDriverOnlineStatus(
@@ -98,6 +126,87 @@ export const DriverHome = () => {
       );
     }
   };
+
+  // Riberalta circuit waypoints for testing local movement & heading
+  const RIBERALTA_TEST_CIRCUIT: [number, number][] = [
+    [-11.0061, -66.0747], // Plaza 3 de Febrero
+    [-11.0048, -66.0741], // Calle Nicolás Suárez
+    [-11.0035, -66.0735], // Hacia Av. Beni
+    [-11.0022, -66.0722], // Av. Gabriel René Moreno
+    [-11.0035, -66.0708], // Hacia Mercado Central
+    [-11.0050, -66.0718], // Calle Plácido Méndez
+    [-11.0061, -66.0732], // Retorno Av. Alberto Reyes
+    [-11.0061, -66.0747], // Plaza 3 de Febrero
+  ];
+
+  // 1. Real GPS Location Tracker when ONLINE
+  useEffect(() => {
+    if (!isOnline || isSimulatingMotion || typeof window === 'undefined') return;
+    if (!('geolocation' in navigator)) return;
+
+    const watchId = navigator.geolocation.watchPosition(
+      (pos) => {
+        const newCoords: LocationPoint = {
+          lat: pos.coords.latitude,
+          lng: pos.coords.longitude,
+          name: 'Conductor en Ruta',
+          address: 'GPS en Vivo',
+        };
+
+        let heading = pos.coords.heading ?? 0;
+        if (lastLocationRef.current) {
+          const dist = calculateDistanceMeters(
+            lastLocationRef.current.lat,
+            lastLocationRef.current.lng,
+            newCoords.lat,
+            newCoords.lng
+          );
+          if (dist >= 1.5) {
+            heading = calculateBearing(
+              lastLocationRef.current.lat,
+              lastLocationRef.current.lng,
+              newCoords.lat,
+              newCoords.lng
+            );
+          }
+        }
+
+        lastLocationRef.current = newCoords;
+        setCurrentLocation(newCoords);
+        const speedKmh = pos.coords.speed ? Math.round(pos.coords.speed * 3.6) : 0;
+        apiService.updateDriverLocation(driverId, newCoords, heading, speedKmh);
+      },
+      (err) => console.warn('Driver geolocation watch error:', err),
+      { enableHighAccuracy: true, maximumAge: 1000, timeout: 10000 }
+    );
+
+    return () => navigator.geolocation.clearWatch(watchId);
+  }, [isOnline, isSimulatingMotion, driverId, setCurrentLocation]);
+
+  // 2. Local Simulation Loop for Testing Movement & Heading (multi-tab / local testing)
+  useEffect(() => {
+    if (!isOnline || !isSimulatingMotion) return;
+
+    const interval = setInterval(() => {
+      simStepRef.current = (simStepRef.current + 1) % RIBERALTA_TEST_CIRCUIT.length;
+      const target = RIBERALTA_TEST_CIRCUIT[simStepRef.current];
+      const prevLoc = lastLocationRef.current || currentLocation || { lat: -11.0061, lng: -66.0747 };
+      const heading = calculateBearing(prevLoc.lat, prevLoc.lng, target[0], target[1]);
+
+      const newCoords: LocationPoint = {
+        lat: target[0],
+        lng: target[1],
+        name: 'Conductor en Movimiento',
+        address: 'Prueba de Ruta Local',
+      };
+
+      lastLocationRef.current = newCoords;
+      setCurrentLocation(newCoords);
+      apiService.updateDriverLocation(driverId, newCoords, heading, 22);
+    }, 2000);
+
+    return () => clearInterval(interval);
+  }, [isOnline, isSimulatingMotion, driverId, currentLocation, setCurrentLocation]);
 
   // Subscribe to active trip updates (e.g. negotiation, payment, fare updates, or cancellation)
   useEffect(() => {
@@ -138,6 +247,9 @@ export const DriverHome = () => {
     if (driverState !== 'ONLINE' && driverState !== 'RIDE_REQUEST') return;
 
     const unsubscribe = apiService.subscribeToPendingRides((pendingRides) => {
+      // Filtrar solicitudes que este chofer específico ya rechazó
+      const availableRides = pendingRides.filter((r) => !rejectedRideIds.includes(r.id));
+
       // Si el chofer está en la tarjeta de solicitud entrante pero el pasajero canceló la búsqueda (autodestrucción en Firestore)
       if (driverState === 'RIDE_REQUEST') {
         const stillPending = pendingRides.some((r) => r.id === pendingRequest?.id);
@@ -156,8 +268,8 @@ export const DriverHome = () => {
         activeTrip.status === 'TRIP_STARTED'
       );
 
-      if (pendingRides.length > 0 && !isTripOngoing && driverState === 'ONLINE') {
-        const req = pendingRides[0];
+      if (availableRides.length > 0 && !isTripOngoing && driverState === 'ONLINE') {
+        const req = availableRides[0];
         setPendingRequest({
           id: req.id,
           pickup: req.pickup,
@@ -179,7 +291,7 @@ export const DriverHome = () => {
     });
 
     return () => unsubscribe();
-  }, [driverState, activeTrip?.status, pendingRequest?.id, setPendingRequest, setDriverState]);
+  }, [driverState, activeTrip?.status, pendingRequest?.id, rejectedRideIds, setPendingRequest, setDriverState]);
 
   // Request countdown timer with sound & haptic alerts
   useEffect(() => {
@@ -187,6 +299,9 @@ export const DriverHome = () => {
       const interval = setInterval(() => {
         setCountdown((prev) => {
           if (prev <= 1) {
+            if (pendingRequest?.id) {
+              markRideAsRejected(pendingRequest.id);
+            }
             setDriverState('ONLINE');
             setPendingRequest(null);
             return 15;
@@ -207,7 +322,7 @@ export const DriverHome = () => {
 
       return () => clearInterval(interval);
     }
-  }, [driverState, setDriverState, setPendingRequest]);
+  }, [driverState, pendingRequest?.id, setDriverState, setPendingRequest]);
 
   const handleAcceptRequest = async () => {
     haptics.heavy();
@@ -238,6 +353,9 @@ export const DriverHome = () => {
 
   const handleRejectRequest = () => {
     haptics.error();
+    if (pendingRequest?.id) {
+      markRideAsRejected(pendingRequest.id);
+    }
     setPendingRequest(null);
     setDriverState('ONLINE');
   };
@@ -380,6 +498,27 @@ export const DriverHome = () => {
             </button>
           </div>
         </div>
+
+        {/* Real-time Movement Tester Pill for Local Testing */}
+        {isOnline && (
+          <div className="flex items-center justify-end pointer-events-auto">
+            <button
+              onClick={() => {
+                haptics.selection();
+                audio.tabClick();
+                setIsSimulatingMotion(!isSimulatingMotion);
+              }}
+              className={`px-3 py-1.5 rounded-full text-[11px] font-black border flex items-center gap-1.5 shadow-lg backdrop-blur-md transition active:scale-95 ${
+                isSimulatingMotion 
+                  ? 'bg-amber-500/20 text-amber-300 border-amber-500/60 shadow-amber-500/20' 
+                  : 'bg-surface/90 text-text-secondary border-gold-primary/30 hover:text-white'
+              }`}
+            >
+              <Navigation className={`w-3.5 h-3.5 ${isSimulatingMotion ? 'animate-spin text-amber-400' : 'text-gold-primary'}`} />
+              <span>{isSimulatingMotion ? '🛵 Conduciendo ruta de prueba...' : '⚡ Probar movimiento en vivo'}</span>
+            </button>
+          </div>
+        )}
 
         {/* Low balance warning floating banner (solo si no tiene saldo Y tampoco tiene viajes gratis) */}
         {lowBalanceBanner && walletBalance <= 0 && freeTrips <= 0 && (

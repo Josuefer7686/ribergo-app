@@ -11,17 +11,12 @@ import { motion } from 'framer-motion';
 import { haptics } from '@/utils/haptics';
 import { audio } from '@/utils/audio';
 import { notifications } from '@/utils/notifications';
+import { usePwa } from '@/utils/pwa';
 
 export const ProfileView = () => {
   const { user, role, setRole, setCurrentView, logout, preferences, setPaymentMethod, toggleNotification, toggleSetting, setShowPwaModal } = useAppStore();
   const [notifPermission, setNotifPermission] = useState<string>(() => notifications.getPermission());
-  const [isStandalone] = useState<boolean>(() => {
-    if (typeof window === 'undefined') return false;
-    const isStandaloneMedia = window.matchMedia('(display-mode: standalone)').matches;
-    const isNavStandalone = (navigator as any).standalone === true;
-    const isAndroidApp = document.referrer.includes('android-app://');
-    return isStandaloneMedia || isNavStandalone || isAndroidApp;
-  });
+  const { isStandalone } = usePwa();
 
   const isPassenger = role === 'PASSENGER';
 

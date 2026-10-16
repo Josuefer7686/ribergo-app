@@ -16,6 +16,8 @@ export interface DriverData {
   phone: string;
   avatar: string;
   currentLocation: { lat: number; lng: number };
+  heading?: number; // Angulo de dirección en grados (0 - 360) hacia donde apunta la moto
+  speed?: number; // Velocidad estimada en km/h
 }
 
 export interface TripHistoryItem {
