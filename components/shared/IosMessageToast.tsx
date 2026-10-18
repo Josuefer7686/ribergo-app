@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { MessageSquare, X, ChevronRight } from 'lucide-react';
 import { useAppStore } from '@/store/useAppStore';
@@ -23,8 +23,13 @@ interface IosMessageToastProps {
 }
 
 export const IosMessageToast = ({ toast, onClose, onOpenChat }: IosMessageToastProps) => {
+  const lastAlertedToastIdRef = useRef<string | null>(null);
+
+  // Play sound, vibration and native notification ONCE per unique message ID (strictly zero infinite loop)
   useEffect(() => {
-    if (toast) {
+    if (toast && toast.id && toast.id !== lastAlertedToastIdRef.current) {
+      lastAlertedToastIdRef.current = toast.id;
+
       // Play iOS message chime sound & rhythmic haptic vibration pattern
       audio.messageReceived();
       haptics.notification();
@@ -35,8 +40,12 @@ export const IosMessageToast = ({ toast, onClose, onOpenChat }: IosMessageToastP
         toast.text,
         toast.senderAvatar
       );
+    }
+  }, [toast]);
 
-      // Auto dismiss after 5.5s
+  // Auto-dismiss after 5.5s
+  useEffect(() => {
+    if (toast) {
       const timer = setTimeout(() => {
         onClose();
       }, 5500);

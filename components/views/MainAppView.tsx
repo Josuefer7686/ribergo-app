@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useAppStore } from '@/store/useAppStore';
 import { BottomNavigation } from '@/components/shared/BottomNavigation';
 import { PassengerHome } from '@/components/views/PassengerHome';
@@ -19,38 +19,55 @@ export function MainAppView() {
   const [activeToast, setActiveToast] = useState<ToastMessageData | null>(null);
   const lastProcessedMsgId = useRef<string | null>(null);
 
+  const activeTripRef = useRef(activeTrip);
+  const assignedDriverRef = useRef(assignedDriver);
+  const isInsideChat = 
+    activeTab === 'MESSAGES' || 
+    (role === 'PASSENGER' && passengerState === 'NEGOTIATING') || 
+    (role === 'DRIVER' && driverState === 'NEGOTIATING');
+  const isInsideChatRef = useRef(isInsideChat);
+
+  useEffect(() => {
+    activeTripRef.current = activeTrip;
+    assignedDriverRef.current = assignedDriver;
+    isInsideChatRef.current = isInsideChat;
+  }, [activeTrip, assignedDriver, isInsideChat]);
+
+  const handleCloseToast = useCallback(() => {
+    setActiveToast(null);
+  }, []);
+
   // Auto-request real GPS location as soon as MainAppView loads
   const { isRequesting, locationError, showPermissionModal, requestLocation } = useAutoLocation();
 
   const rideId = activeTrip?.id;
 
-  // Determine if the user is currently inside any chat interface (Messages tab or Negotiation modal)
-  const isInsideChat = 
-    activeTab === 'MESSAGES' || 
-    (role === 'PASSENGER' && passengerState === 'NEGOTIATING') || 
-    (role === 'DRIVER' && driverState === 'NEGOTIATING');
-
-  // Toast is suppressed when user is inside any chat interface
-
-  // Real-time listener for incoming messages to show iOS 18 Dynamic Island banner
+  // Real-time listener for incoming messages to show iOS 18 Dynamic Island banner (stable subscription)
   useEffect(() => {
-    if (!rideId) return;
+    if (!rideId) {
+      lastProcessedMsgId.current = null;
+      return;
+    }
 
     const unsubscribe = apiService.subscribeToMessages(rideId, (messages) => {
-      if (messages.length === 0) return;
+      if (!messages || messages.length === 0) return;
 
       const latestMsg = messages[messages.length - 1];
+      if (!latestMsg || !latestMsg.text) return;
+
       const isFromOtherUser = (role === 'PASSENGER' && latestMsg.sender === 'DRIVER') || (role === 'DRIVER' && latestMsg.sender === 'PASSENGER');
 
       if (isFromOtherUser && latestMsg.id !== lastProcessedMsgId.current) {
         lastProcessedMsgId.current = latestMsg.id;
 
         // If user is currently NOT inside any chat, show the floating iOS 18 banner
-        if (!isInsideChat) {
+        if (!isInsideChatRef.current) {
+          const currentTrip = activeTripRef.current;
+          const currentDriver = assignedDriverRef.current;
           setActiveToast({
             id: latestMsg.id,
-            senderName: role === 'PASSENGER' ? (assignedDriver?.name || activeTrip?.driver?.name || 'Mototaxista RiberGO') : (activeTrip?.passengerName || 'Pasajero RiberGO'),
-            senderAvatar: assignedDriver?.avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=150&q=80',
+            senderName: role === 'PASSENGER' ? (currentDriver?.name || currentTrip?.driver?.name || 'Mototaxista RiberGO') : (currentTrip?.passengerName || 'Pasajero RiberGO'),
+            senderAvatar: currentDriver?.avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=150&q=80',
             text: latestMsg.text,
             time: latestMsg.time || 'Ahora',
           });
@@ -59,7 +76,7 @@ export function MainAppView() {
     });
 
     return () => unsubscribe();
-  }, [rideId, role, isInsideChat, assignedDriver, activeTrip]);
+  }, [rideId, role]);
 
   const renderContent = () => {
     switch (activeTab) {
@@ -82,8 +99,8 @@ export function MainAppView() {
     <div className="flex flex-col h-full w-full relative overflow-hidden bg-background">
       {/* Floating iOS 18 Dynamic Island Message Toast Banner */}
       <IosMessageToast
-        toast={isInsideChat ? null : activeToast}
-        onClose={() => setActiveToast(null)}
+        toast={!rideId || isInsideChat ? null : activeToast}
+        onClose={handleCloseToast}
         onOpenChat={() => setActiveTab('MESSAGES')}
       />
 

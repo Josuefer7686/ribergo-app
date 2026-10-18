@@ -42,6 +42,7 @@ export const DriverHome = () => {
   const activeTripRef = useRef(activeTrip);
   const pendingRequestRef = useRef(pendingRequest);
   const lastAlertedRideIdRef = useRef<string | null>(null);
+  const acceptedAtMsRef = useRef<number>(0);
 
   useEffect(() => {
     driverStateRef.current = driverState;
@@ -244,10 +245,15 @@ export const DriverHome = () => {
       // Si la negociación fue liberada o cancelada por el pasajero:
       // Solo regresar a ONLINE si el viaje ya no nos corresponde (sin chofer o con otro chofer)
       if (rideData.status === 'SEARCHING_DRIVER') {
+        // Si el chofer acaba de aceptar este viaje en los últimos 12 segundos, NO abortar (evitar lecturas no sincronizadas de Firestore)
+        const elapsedSinceAccept = Date.now() - (acceptedAtMsRef.current || 0);
+        if (elapsedSinceAccept < 12000) {
+          return;
+        }
+
         if (!rideData.driverId || (rideData.driverId && rideData.driverId !== driverId)) {
           setDriverState('ONLINE');
           setActiveTrip(null);
-          lastAlertedRideIdRef.current = null;
           return;
         }
       }
@@ -403,11 +409,12 @@ export const DriverHome = () => {
     // 1. Guardar de inmediato en el bus local ANTES de renderizar el chat para evitar lecturas de SEARCHING_DRIVER
     realtimeSyncBus.saveRide(updatedRide);
 
-    // 2. Fijar estado en store (0ms)
+    // 2. Fijar estado en store y registrar marca temporal (0ms)
+    acceptedAtMsRef.current = Date.now();
+    lastAlertedRideIdRef.current = rideToAccept.id;
     setActiveTrip(updatedRide);
     setDriverState('NEGOTIATING');
     setPendingRequest(null);
-    lastAlertedRideIdRef.current = null;
 
     // 3. Persistir en Firestore de fondo
     try {

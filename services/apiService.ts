@@ -893,7 +893,13 @@ export const apiService = {
           doc(db, 'rides', rideId),
           (snapshot) => {
             if (snapshot.exists()) {
-              const data = { id: snapshot.id, ...snapshot.data() };
+              const data: any = { id: snapshot.id, ...snapshot.data() };
+              // Guard contra lecturas obsoletas de Firestore: si el cliente local ya está en NEGOTIATING o superior,
+              // no permitir que un snapshot previo con SEARCHING_DRIVER degrade el estado local
+              const currentLocal = realtimeSyncBus.getRide(rideId);
+              if (currentLocal && (currentLocal.status === 'NEGOTIATING' || currentLocal.status === 'GOING_TO_PASSENGER') && data.status === 'SEARCHING_DRIVER') {
+                return;
+              }
               realtimeSyncBus.saveRide(data);
               callback(data);
             } else {
@@ -1027,8 +1033,10 @@ export const apiService = {
           plate: driver.plate,
           acceptedAt: serverTimestamp(),
         };
-        await updateDoc(doc(db, 'active_requests', rideId), updateData).catch(() => {});
-        await updateDoc(doc(db, 'rides', rideId), updateData).catch(() => {});
+        await Promise.all([
+          updateDoc(doc(db, 'rides', rideId), updateData).catch(() => {}),
+          updateDoc(doc(db, 'active_requests', rideId), updateData).catch(() => {}),
+        ]);
       } catch (err) {
         console.warn('Firestore Accept Ride Error:', err);
       }
