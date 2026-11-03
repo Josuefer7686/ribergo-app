@@ -148,3 +148,21 @@ body.theme-light .leaflet-container {
   background: #E5E7EB !important;
 }
 
+/* Custom Animated Leaflet Moto Popup */
+.custom-leaflet-moto-popup .leaflet-popup-content-wrapper {
+  background: transparent !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+  border: none !important;
+  border-radius: 1rem !important;
+}
+
+.custom-leaflet-moto-popup .leaflet-popup-tip-container {
+  display: none !important;
+}
+
+.custom-leaflet-moto-popup .leaflet-popup-content {
+  margin: 0 !important;
+  line-height: normal !important;
+}
+

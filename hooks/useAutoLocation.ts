@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useAppStore, LocationPoint } from '@/store/useAppStore';
 
 export function useAutoLocation() {
-  const { currentLocation, setCurrentLocation, gpsPermission, setGpsPermission } = useAppStore();
+  const { currentLocation, setCurrentLocation, gpsPermission, setGpsPermission, triggerMapRecenter } = useAppStore();
   const [isRequesting, setIsRequesting] = useState(false);
   const [locationError, setLocationError] = useState<string | null>(null);
   const [showPermissionModal, setShowPermissionModal] = useState(false);
@@ -14,6 +14,12 @@ export function useAutoLocation() {
 
     setIsRequesting(true);
     setLocationError(null);
+
+    // If we already have a location, immediately trigger recenter so user gets instant visual feedback
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('ribergo:recenter_map'));
+    }
+    triggerMapRecenter();
 
     if (!('geolocation' in navigator)) {
       setGpsPermission('denied');
@@ -34,6 +40,10 @@ export function useAutoLocation() {
         };
 
         setCurrentLocation(coords);
+        triggerMapRecenter();
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('ribergo:recenter_map', { detail: { lat: coords.lat, lng: coords.lng } }));
+        }
         setGpsPermission('granted');
         setLocationError(null);
         setShowPermissionModal(false);
@@ -62,7 +72,7 @@ export function useAutoLocation() {
         maximumAge: 0,
       }
     );
-  }, [setCurrentLocation, setGpsPermission]);
+  }, [setCurrentLocation, setGpsPermission, triggerMapRecenter]);
 
   // Automatically request GPS as soon as app/component mounts
   useEffect(() => {

@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
-import { DriverData, ChatMessage, TripHistoryItem, INITIAL_TRIPS, MOCK_DRIVERS, RIBERALTA_CENTER } from '@/services/mockData';
+import { DriverData, ChatMessage, TripHistoryItem, INITIAL_TRIPS, RIBERALTA_CENTER } from '@/services/mockData';
 
 export type UserRole = 'PASSENGER' | 'DRIVER';
 export type AppView = 'SPLASH' | 'LOGIN' | 'REGISTER' | 'ROLE_SELECTION' | 'MAIN_APP';
@@ -190,6 +190,8 @@ interface AppState {
   setDestination: (loc: LocationPoint | null) => void;
   gpsPermission: 'prompt' | 'granted' | 'denied';
   setGpsPermission: (status: 'prompt' | 'granted' | 'denied') => void;
+  mapRecenterTrigger: number;
+  triggerMapRecenter: () => void;
 
   // Passenger Ride Flow
   passengerState: PassengerRideState;
@@ -210,6 +212,8 @@ interface AppState {
   // Real-time Online Drivers on Map
   onlineDrivers: DriverData[];
   setOnlineDrivers: (drivers: DriverData[]) => void;
+  selectedDriverId: string | null;
+  setSelectedDriverId: (id: string | null) => void;
 
   // Chat
   chatMessages: ChatMessage[];
@@ -330,6 +334,8 @@ export const useAppStore = create<AppState>()(
       setDestination: (loc) => set({ destination: loc }),
       gpsPermission: 'prompt',
       setGpsPermission: (status) => set({ gpsPermission: status }),
+      mapRecenterTrigger: 0,
+      triggerMapRecenter: () => set((state) => ({ mapRecenterTrigger: state.mapRecenterTrigger + 1 })),
 
       passengerState: 'IDLE',
       setPassengerState: (pState) => set({ passengerState: pState }),
@@ -346,6 +352,8 @@ export const useAppStore = create<AppState>()(
 
       onlineDrivers: [],
       setOnlineDrivers: (drivers) => set({ onlineDrivers: drivers }),
+      selectedDriverId: null,
+      setSelectedDriverId: (id) => set({ selectedDriverId: id }),
 
       chatMessages: [],
       addChatMessage: (msg) => set((state) => ({ chatMessages: [...state.chatMessages, msg] })),
@@ -396,6 +404,7 @@ export const useAppStore = create<AppState>()(
         activeTrip: null,
         pendingRequest: null,
         chatMessages: [],
+        selectedDriverId: null,
       }),
     }),
     {

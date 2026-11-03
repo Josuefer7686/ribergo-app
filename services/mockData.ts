@@ -101,41 +101,7 @@ export const RIBERALTA_DESTINATIONS: DestinationOption[] = [
   },
 ];
 
-export const MOCK_DRIVERS: DriverData[] = [
-  {
-    id: 'drv-1',
-    name: 'Carlos Mendoza',
-    rating: 4.9,
-    trips: 128,
-    motorcycle: 'Honda Wave 110',
-    plate: 'RBT-482',
-    phone: '+591 71234567',
-    avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=150&q=80',
-    currentLocation: { lat: -11.0045, lng: -66.0735 },
-  },
-  {
-    id: 'drv-2',
-    name: 'María González',
-    rating: 4.8,
-    trips: 56,
-    motorcycle: 'Suzuki AX100',
-    plate: 'RBT-193',
-    phone: '+591 72987654',
-    avatar: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=150&q=80',
-    currentLocation: { lat: -11.0080, lng: -66.0760 },
-  },
-  {
-    id: 'drv-3',
-    name: 'Javier Roca',
-    rating: 4.95,
-    trips: 210,
-    motorcycle: 'Yamaha Crypton 115',
-    plate: 'RBT-774',
-    phone: '+591 73541289',
-    avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=150&q=80',
-    currentLocation: { lat: -11.0020, lng: -66.0720 },
-  },
-];
+export const MOCK_DRIVERS: DriverData[] = [];
 
 export const INITIAL_TRIPS: TripHistoryItem[] = [
   {

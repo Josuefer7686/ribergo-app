@@ -1,16 +1,14 @@
 'use client';
 
-import { useEffect, useState, useRef } from 'react';
-import { MapContainer, TileLayer, Marker, useMap, Polyline } from 'react-leaflet';
+import { useEffect, useState, useRef, useMemo } from 'react';
+import { MapContainer, TileLayer, Marker, Popup, useMap, useMapEvents, Polyline } from 'react-leaflet';
 import L from 'leaflet';
 import { useAppStore } from '@/store/useAppStore';
-import { MOCK_DRIVERS, DriverData } from '@/services/mockData';
+import { DriverData } from '@/services/mockData';
 import { apiService } from '@/services/apiService';
-import { motion, AnimatePresence } from 'framer-motion';
-import { Bike, X, ShieldCheck, Star, Compass, Sparkles, Navigation, ChevronRight } from 'lucide-react';
+import { Bike } from 'lucide-react';
 import { haptics } from '@/utils/haptics';
 import { audio } from '@/utils/audio';
-import { calculateDistanceMeters, formatDistance, getBearingDirectionLabel } from '@/utils/geo';
 
 // Fix Leaflet default icon paths
 if (typeof window !== 'undefined') {
@@ -62,19 +60,19 @@ function getMotoIcon(active = false, heading = 0, isMoving = false) {
   
   return new L.DivIcon({
     html: `
-      <div style="position: relative; width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; cursor: pointer;">
+      <div style="position: relative; width: 46px; height: 46px; display: flex; align-items: center; justify-content: center; cursor: pointer;">
         <!-- Directional Pointer Arrow (Points to heading direction) -->
         <div style="position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; transform: rotate(${rotation}deg); transition: transform 0.4s cubic-bezier(0.4, 0, 0.2, 1); pointer-events: none;">
-          <div style="position: absolute; top: -7px; width: 0; height: 0; border-left: 6px solid transparent; border-right: 6px solid transparent; border-bottom: 10px solid #F4C542; filter: drop-shadow(0 0 5px rgba(244,197,66,0.95));"></div>
+          <div style="position: absolute; top: -8px; width: 0; height: 0; border-left: 7px solid transparent; border-right: 7px solid transparent; border-bottom: 11px solid #F4C542; filter: drop-shadow(0 0 6px rgba(244,197,66,0.95));"></div>
         </div>
 
         <!-- Ambient Golden Pulse Ring -->
-        <div style="position: absolute; inset: -4px; border-radius: 50%; background: rgba(244,197,66,0.22); ${isMoving || active ? 'animation: ping 1.8s cubic-bezier(0,0,0.2,1) infinite;' : ''} pointer-events: none;"></div>
+        <div style="position: absolute; inset: -4px; border-radius: 50%; background: rgba(244,197,66,0.25); ${isMoving || active ? 'animation: ping 1.8s cubic-bezier(0,0,0.2,1) infinite;' : ''} pointer-events: none;"></div>
 
         <!-- Inner Mototaxi Bubble with smooth rotation -->
-        <div style="width: 36px; height: 36px; background: #05080B; border: 2.5px solid ${bgColor}; border-radius: 50%; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 14px rgba(0,0,0,0.85), 0 0 14px rgba(244,197,66,0.5); transform: scale(${active ? 1.15 : 1}); transition: all 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);">
-          <div style="transform: rotate(${rotation}deg); transition: transform 0.4s cubic-bezier(0.4, 0, 0.2, 1); display: flex; align-items: center; justify-content: center;">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="${bgColor}" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round">
+        <div style="width: 38px; height: 38px; background: #05080B; border: 2.5px solid ${bgColor}; border-radius: 50%; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 14px rgba(0,0,0,0.85), 0 0 ${active ? '18px rgba(244,197,66,0.9)' : '10px rgba(244,197,66,0.45)'}; transform: scale(${active ? 1.15 : 1}); transition: all 0.3s cubic-bezier(0.2, 0.8, 0.2, 1); pointer-events: none;">
+          <div style="transform: rotate(${rotation}deg); transition: transform 0.4s cubic-bezier(0.4, 0, 0.2, 1); display: flex; align-items: center; justify-content: center; pointer-events: none;">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="${bgColor}" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round">
               <circle cx="5.5" cy="17.5" r="3.5"/>
               <circle cx="18.5" cy="17.5" r="3.5"/>
               <path d="M15 6h2l3 5v5h-2"/>
@@ -84,27 +82,127 @@ function getMotoIcon(active = false, heading = 0, isMoving = false) {
         </div>
 
         <!-- Online Green Status Indicator Dot -->
-        <div style="position: absolute; bottom: 1px; right: 1px; width: 10px; height: 10px; background: #10B981; border: 2px solid #05080B; border-radius: 50%; box-shadow: 0 0 6px #10B981;"></div>
+        <div style="position: absolute; bottom: 1px; right: 1px; width: 11px; height: 11px; background: #10B981; border: 2px solid #05080B; border-radius: 50%; box-shadow: 0 0 6px #10B981; pointer-events: none;"></div>
       </div>
     `,
     className: 'custom-moto-marker-interactive',
-    iconSize: [44, 44],
-    iconAnchor: [22, 22]
+    iconSize: [46, 46],
+    iconAnchor: [23, 23]
   });
 }
 
-function MapUpdater({ center, destination }: { center: [number, number]; destination?: [number, number] | null }) {
-  const map = useMap();
+function MapClickHandler({ onMapClick }: { onMapClick: () => void }) {
+  useMapEvents({
+    click: () => {
+      onMapClick();
+    },
+  });
+  return null;
+}
 
+function MapUpdater({ 
+  centerLat, 
+  centerLng, 
+  destination,
+  selectedDriverLocation,
+  recenterTrigger = 0,
+}: { 
+  centerLat: number;
+  centerLng: number;
+  destination?: [number, number] | null;
+  selectedDriverLocation?: [number, number] | null;
+  recenterTrigger?: number;
+}) {
+  const map = useMap();
+  const prevCenterRef = useRef<string>('');
+  const prevDestRef = useRef<string>('');
+  const prevRecenterRef = useRef<number>(recenterTrigger);
+  const hasInitializedRef = useRef<boolean>(false);
+  const isDefaultPlaza = Math.abs(centerLat - (-11.0061)) < 0.0001 && Math.abs(centerLng - (-66.0747)) < 0.0001;
+  const prevIsDefaultRef = useRef<boolean>(isDefaultPlaza);
+
+  // Invalidate map size once on mount
   useEffect(() => {
-    map.invalidateSize();
-    if (center && destination) {
-      const bounds = L.latLngBounds([center, destination]);
-      map.fitBounds(bounds, { padding: [60, 60], maxZoom: 16 });
-    } else if (center) {
-      map.setView(center, 15, { animate: true });
+    const timer = setTimeout(() => {
+      map.invalidateSize();
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [map]);
+
+  // Center smoothly on initial load or when destination bounds change
+  useEffect(() => {
+    const centerKey = `${centerLat.toFixed(5)},${centerLng.toFixed(5)}`;
+    const destKey = destination ? `${destination[0].toFixed(5)},${destination[1].toFixed(5)}` : '';
+
+    if (destination) {
+      if (prevDestRef.current !== destKey) {
+        prevDestRef.current = destKey;
+        const bounds = L.latLngBounds([[centerLat, centerLng], destination]);
+        map.fitBounds(bounds, { padding: [60, 60], maxZoom: 16 });
+      }
+    } else if (!hasInitializedRef.current) {
+      hasInitializedRef.current = true;
+      prevCenterRef.current = centerKey;
+      map.setView([centerLat, centerLng], 15, { animate: false });
     }
-  }, [center, destination, map]);
+  }, [centerLat, centerLng, destination, map]);
+
+  // If initial load was default plaza, fly to user location when real GPS is first received
+  useEffect(() => {
+    if (prevIsDefaultRef.current && !isDefaultPlaza) {
+      prevIsDefaultRef.current = false;
+      map.stop();
+      try {
+        map.flyTo([centerLat, centerLng], 16, { animate: true, duration: 0.8 });
+      } catch {
+        map.setView([centerLat, centerLng], 16, { animate: true });
+      }
+    }
+  }, [centerLat, centerLng, isDefaultPlaza, map]);
+
+  // Recenter map immediately on custom event (0ms latency, bypasses any React state delays)
+  useEffect(() => {
+    const handleRecenter = (e?: any) => {
+      const state = useAppStore.getState();
+      const targetLat = e?.detail?.lat ?? state.currentLocation?.lat ?? -11.0061;
+      const targetLng = e?.detail?.lng ?? state.currentLocation?.lng ?? -66.0747;
+      
+      map.stop();
+      map.invalidateSize();
+      try {
+        map.flyTo([targetLat, targetLng], 16, { animate: true, duration: 0.7 });
+      } catch {
+        map.setView([targetLat, targetLng], 16, { animate: true });
+      }
+    };
+
+    window.addEventListener('ribergo:recenter_map', handleRecenter);
+    return () => window.removeEventListener('ribergo:recenter_map', handleRecenter);
+  }, [map]);
+
+  // Smoothly fly to user location whenever recenterTrigger changes
+  useEffect(() => {
+    if (recenterTrigger > 0) {
+      const state = useAppStore.getState();
+      const targetLat = state.currentLocation?.lat ?? centerLat;
+      const targetLng = state.currentLocation?.lng ?? centerLng;
+      map.stop();
+      map.invalidateSize();
+      try {
+        map.flyTo([targetLat, targetLng], 16, { animate: true, duration: 0.7 });
+      } catch {
+        map.setView([targetLat, targetLng], 16, { animate: true });
+      }
+    }
+  }, [recenterTrigger, map]);
+
+  // Smoothly pan towards selected driver if tapped
+  useEffect(() => {
+    if (selectedDriverLocation) {
+      map.stop();
+      map.panTo(selectedDriverLocation, { animate: true, duration: 0.45 });
+    }
+  }, [selectedDriverLocation?.[0], selectedDriverLocation?.[1], map]);
 
   return null;
 }
@@ -112,11 +210,12 @@ function MapUpdater({ center, destination }: { center: [number, number]; destina
 export default function MapComponent() {
   const { 
     currentLocation, destination, role, passengerState, driverState, 
-    assignedDriver, onlineDrivers, setOnlineDrivers, setPassengerState 
+    assignedDriver, onlineDrivers, setOnlineDrivers,
+    selectedDriverId, setSelectedDriverId,
+    mapRecenterTrigger
   } = useAppStore();
 
   const [animatedMotoPos, setAnimatedMotoPos] = useState<[number, number] | null>(null);
-  const [selectedDriverId, setSelectedDriverId] = useState<string | null>(null);
 
   // Check if destination is "Acordar en persona"
   const isInPersonDestination = !destination || (destination as any).id === 'in-person' || destination.name?.toLowerCase().includes('acordar');
@@ -129,15 +228,19 @@ export default function MapComponent() {
     return () => unsubscribe();
   }, [setOnlineDrivers]);
 
-  // Use real online drivers if available; fallback to Riberalta mock drivers for immediate offline/local responsiveness
-  const activeDriversList: DriverData[] = onlineDrivers.length > 0 ? onlineDrivers : MOCK_DRIVERS;
+  // Only real online drivers (100% real, no bots/mocks)
+  const activeDriversList: DriverData[] = onlineDrivers;
 
-  // Derive selectedDriver directly from active list so its live position & heading are always 100% synchronized
+  // Selected driver coordinate for smooth auto-centering
   const selectedDriver = activeDriversList.find((d) => d.id === selectedDriverId) || null;
 
-  const center: [number, number] = currentLocation 
-    ? [currentLocation.lat, currentLocation.lng] 
-    : [-11.0061, -66.0747]; 
+  const selectedDriverLocation: [number, number] | null = selectedDriver?.currentLocation 
+    ? [selectedDriver.currentLocation.lat, selectedDriver.currentLocation.lng] 
+    : null;
+
+  const centerLat = currentLocation ? currentLocation.lat : -11.0061;
+  const centerLng = currentLocation ? currentLocation.lng : -66.0747;
+  const center = useMemo<[number, number]>(() => [centerLat, centerLng], [centerLat, centerLng]); 
 
   // Only define destination coordinates if NOT "Acordar en persona"
   const destPoint: [number, number] | null = (destination && !isInPersonDestination)
@@ -198,7 +301,14 @@ export default function MapComponent() {
           attribution='&copy; OpenStreetMap'
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
         />
-        <MapUpdater center={center} destination={isTripActive && !isInPersonDestination ? destPoint : null} />
+        <MapUpdater 
+          centerLat={centerLat} 
+          centerLng={centerLng} 
+          destination={isTripActive && !isInPersonDestination ? destPoint : null} 
+          selectedDriverLocation={selectedDriverLocation}
+          recenterTrigger={mapRecenterTrigger}
+        />
+        <MapClickHandler onMapClick={() => setSelectedDriverId(null)} />
         
         {/* User / Pickup Location */}
         {currentLocation && (
@@ -253,144 +363,38 @@ export default function MapComponent() {
                     position={[driver.currentLocation.lat, driver.currentLocation.lng]} 
                     icon={getMotoIcon(isSelected || isAssigned, heading, isMoving)}
                     eventHandlers={{
-                      click: () => {
+                      click: (e) => {
+                        L.DomEvent.stopPropagation(e as any);
                         haptics.impact();
                         audio.tabClick();
                         setSelectedDriverId(driver.id);
                       }
                     }}
-                  />
+                  >
+                    {isSelected && (
+                      <Popup
+                        position={[driver.currentLocation.lat, driver.currentLocation.lng]}
+                        closeButton={false}
+                        autoPan={false}
+                        className="custom-leaflet-moto-popup"
+                        offset={[0, -28]}
+                      >
+                        <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-2xl bg-[#05080B]/95 border-2 border-[#F4C542] text-xs font-black text-white shadow-[0_4px_20px_rgba(244,197,66,0.5)] animate-in fade-in zoom-in-95 duration-200">
+                          <Bike className="w-3.5 h-3.5 text-[#F4C542] shrink-0" />
+                          <span className="tracking-wide text-white font-extrabold">{driver.name || 'Conductor'}</span>
+                          <span className="px-1.5 py-0.5 rounded-md bg-emerald-950/80 border border-emerald-500/40 text-[9px] font-bold text-emerald-400 flex items-center gap-1">
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                            <span>En línea</span>
+                          </span>
+                        </div>
+                      </Popup>
+                    )}
+                  </Marker>
                 );
               })}
           </>
         )}
       </MapContainer>
-
-      {/* SUPER ANIMATED MOTORCYCLE & DRIVER BUBBLE (Framer Motion) */}
-      <AnimatePresence>
-        {selectedDriver && role === 'PASSENGER' && (
-          <motion.div
-            initial={{ scale: 0.8, opacity: 0, y: 35 }}
-            animate={{ scale: 1, opacity: 1, y: 0 }}
-            exit={{ scale: 0.8, opacity: 0, y: 25 }}
-            transition={{ type: 'spring', damping: 22, stiffness: 350 }}
-            className="absolute bottom-24 left-4 right-4 z-50 pointer-events-auto max-w-sm mx-auto"
-          >
-            <div className="relative p-4 rounded-3xl bg-surface/95 backdrop-blur-xl border-2 border-gold-primary/60 shadow-[0_20px_50px_rgba(0,0,0,0.85),0_0_30px_rgba(244,197,66,0.25)] text-white overflow-hidden space-y-3">
-              
-              {/* Gold Shimmer Ambient Aura */}
-              <div className="absolute top-0 right-0 w-36 h-36 bg-gold-primary/15 rounded-full blur-2xl pointer-events-none" />
-
-              {/* TOP HEADER: Prominent Motorcycle Model & Plate Badge */}
-              <div className="flex items-center justify-between pb-3 border-b border-border-custom/80">
-                <div className="flex items-center gap-2.5">
-                  <div className="w-9 h-9 rounded-2xl bg-gradient-to-tr from-gold-primary/20 via-gold-primary/10 to-transparent border border-gold-primary/50 flex items-center justify-center text-gold-primary shadow-inner">
-                    <Bike className="w-5 h-5 stroke-[2.2]" />
-                  </div>
-                  <div>
-                    <span className="text-[9px] font-black text-gold-primary uppercase tracking-widest block">
-                      Modelo de Mototaxi
-                    </span>
-                    <h4 className="text-sm font-black text-white tracking-wide">
-                      {selectedDriver.motorcycle || 'Honda Wave 110'}
-                    </h4>
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-2">
-                  <span className="px-2.5 py-1 rounded-xl bg-surface-2 border border-gold-primary/40 font-mono text-xs font-black text-gold-light tracking-wider shadow-sm">
-                    {selectedDriver.plate || 'RBT-100'}
-                  </span>
-                  <button
-                    onClick={() => {
-                      haptics.selection();
-                      setSelectedDriverId(null);
-                    }}
-                    className="w-7 h-7 rounded-full bg-surface-2 hover:bg-gold-primary/20 text-text-secondary hover:text-white flex items-center justify-center transition active:scale-90"
-                    title="Cerrar burbuja"
-                  >
-                    <X className="w-4 h-4" />
-                  </button>
-                </div>
-              </div>
-
-              {/* DRIVER INFO: Avatar, Name, Rating, Trips */}
-              <div className="flex items-center gap-3">
-                <div className="relative shrink-0">
-                  <img 
-                    src={selectedDriver.avatar || '/logo.png'} 
-                    alt={selectedDriver.name} 
-                    className="w-12 h-12 rounded-2xl object-cover border-2 border-gold-primary/50 shadow-md"
-                  />
-                  <div className="w-3.5 h-3.5 rounded-full bg-emerald-500 border-2 border-surface absolute -bottom-0.5 -right-0.5 shadow-sm" />
-                </div>
-
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-1.5">
-                    <h5 className="font-bold text-sm text-white truncate">{selectedDriver.name}</h5>
-                    <ShieldCheck className="w-4 h-4 text-gold-primary shrink-0" />
-                  </div>
-                  <div className="flex items-center gap-2 mt-0.5 text-xs text-text-secondary">
-                    <span className="flex items-center gap-1 text-gold-primary font-bold">
-                      <Star className="w-3.5 h-3.5 fill-gold-primary" />
-                      <span>{selectedDriver.rating ? selectedDriver.rating.toFixed(1) : '5.0'}</span>
-                    </span>
-                    <span>•</span>
-                    <span>{selectedDriver.trips || 12} viajes</span>
-                  </div>
-                </div>
-              </div>
-
-              {/* REAL-TIME COMPASS & HEADING DIRECTION BADGE */}
-              <div className="p-2.5 rounded-2xl bg-surface-2/90 border border-border-custom flex items-center justify-between text-xs">
-                <div className="flex items-center gap-2.5">
-                  <div className="w-7 h-7 rounded-xl bg-gold-primary/10 border border-gold-primary/30 flex items-center justify-center text-gold-primary shadow-sm">
-                    <Compass 
-                      className="w-4 h-4 transition-transform duration-500" 
-                      style={{ transform: `rotate(${selectedDriver.heading || 0}deg)` }}
-                    />
-                  </div>
-                  <div>
-                    <span className="text-[10px] text-text-secondary block">Rumbo en vivo</span>
-                    <span className="font-extrabold text-white text-[11px] flex items-center gap-1">
-                      <span>{getBearingDirectionLabel(selectedDriver.heading || 0)}</span>
-                      <span className="text-gold-light text-[10px]">({selectedDriver.heading || 0}°)</span>
-                      <span className="text-text-secondary text-[10px] font-normal">
-                        {selectedDriver.speed && selectedDriver.speed > 0 ? `• ${selectedDriver.speed} km/h` : '• En parada'}
-                      </span>
-                    </span>
-                  </div>
-                </div>
-
-                <div className="text-right">
-                  <span className="text-[10px] text-text-secondary block">Distancia</span>
-                  <span className="font-black text-gold-primary text-[11px]">
-                    {currentLocation 
-                      ? formatDistance(calculateDistanceMeters(currentLocation.lat, currentLocation.lng, selectedDriver.currentLocation.lat, selectedDriver.currentLocation.lng))
-                      : 'En Riberalta'}
-                  </span>
-                </div>
-              </div>
-
-              {/* ACTION: Pedir viaje directamente o seleccionar para destino */}
-              <button
-                onClick={() => {
-                  haptics.heavy();
-                  audio.tabClick();
-                  setSelectedDriverId(null);
-                  setPassengerState('LOCATION_READY');
-                }}
-                className="w-full py-2.5 rounded-2xl bg-gold-primary hover:bg-gold-light text-background font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 shadow-lg shadow-gold-primary/25 transition active:scale-95"
-              >
-                <Sparkles className="w-4 h-4 fill-background" />
-                <span>Pedir viaje con {selectedDriver.name.split(' ')[0]}</span>
-                <ChevronRight className="w-4 h-4 stroke-[3]" />
-              </button>
-
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
     </div>
   );
 }

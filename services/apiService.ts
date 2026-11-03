@@ -2,7 +2,7 @@ import {
   ActiveTripInfo, LocationPoint, UserProfile, UserRole, 
   TerminalDeparture, TerminalBooking, TerminalExpreso, TerminalEncomienda 
 } from '@/store/useAppStore';
-import { MOCK_DRIVERS, DriverData } from './mockData';
+import { DriverData } from './mockData';
 import { db, auth, isFirebaseConfigured } from '@/lib/firebase';
 import { 
   collection, doc, setDoc, getDoc, getDocs, addDoc, updateDoc, onSnapshot, query, where, orderBy, serverTimestamp 
@@ -647,17 +647,46 @@ export const apiService = {
     location: LocationPoint, 
     isOnline: boolean,
     heading: number = 0,
-    speed: number = 0
+    speed: number = 0,
+    trips: number = 0,
+    avatar: string = ''
   ) {
+    let realName = driverName;
+    let realPhone = phone;
+    let realMotorcycle = motorcycle;
+    let realPlate = plate;
+    let realRating = rating;
+    let realTrips = trips;
+    let realAvatar = avatar;
+
+    // Fetch latest genuine profile from Firestore 'users' collection if available
+    if (isFirebaseConfigured() && driverId) {
+      try {
+        const userDoc = await getDoc(doc(db, 'users', driverId));
+        if (userDoc.exists()) {
+          const uData = userDoc.data();
+          if (uData.name) realName = uData.name;
+          if (uData.phone) realPhone = uData.phone;
+          if (uData.motorcycle) realMotorcycle = uData.motorcycle;
+          if (uData.plate) realPlate = uData.plate;
+          if (typeof uData.rating === 'number') realRating = uData.rating;
+          if (typeof uData.trips === 'number') realTrips = uData.trips;
+          if (uData.avatar) realAvatar = uData.avatar;
+        }
+      } catch (err) {
+        console.warn('Notice: could not load user profile for driver status:', err);
+      }
+    }
+
     const driverData: DriverData = {
       id: driverId,
-      name: driverName || 'Mototaxi Riberalta',
-      phone: phone || '+591 70000000',
-      rating: rating || 5.0,
-      trips: 12,
-      avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=150&q=80',
-      motorcycle: motorcycle || 'Honda Wave 110',
-      plate: plate || 'RBT-100',
+      name: realName || 'Conductor',
+      phone: realPhone,
+      rating: realRating,
+      trips: realTrips,
+      avatar: realAvatar,
+      motorcycle: realMotorcycle,
+      plate: realPlate,
       currentLocation: location,
       heading,
       speed,
@@ -733,13 +762,13 @@ export const apiService = {
               const data = docSnap.data();
               return {
                 id: docSnap.id,
-                name: data.name || 'Mototaxi Riberalta',
-                phone: data.phone || '+591 70000000',
-                rating: data.rating || 5.0,
-                trips: data.trips || 12,
-                avatar: data.avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=150&q=80',
-                motorcycle: data.motorcycle || 'Honda Wave 110',
-                plate: data.plate || 'RBT-100',
+                name: data.name || 'Conductor',
+                phone: data.phone || '',
+                rating: typeof data.rating === 'number' ? data.rating : 5.0,
+                trips: typeof data.trips === 'number' ? data.trips : 0,
+                avatar: data.avatar || '',
+                motorcycle: data.motorcycle || '',
+                plate: data.plate || '',
                 currentLocation: data.currentLocation || { lat: -11.0061, lng: -66.0747 },
                 heading: data.heading || 0,
                 speed: data.speed || 0,

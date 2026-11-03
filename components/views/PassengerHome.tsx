@@ -6,10 +6,10 @@ import { apiService } from '@/services/apiService';
 import { haptics } from '@/utils/haptics';
 import { audio } from '@/utils/audio';
 import { MapView } from '@/components/map/MapView';
-import { RIBERALTA_DESTINATIONS, DestinationOption, MOCK_DRIVERS } from '@/services/mockData';
+import { RIBERALTA_DESTINATIONS, DestinationOption } from '@/services/mockData';
 import { 
   Bike, Navigation, Search, MapPin, Star, MessageSquare, X, Check, Clock, DollarSign, Shield, ChevronRight, AlertCircle,
-  QrCode, Sparkles, TrendingUp, Flame
+  QrCode, Sparkles, TrendingUp, Flame, Compass, ShieldCheck
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -17,6 +17,8 @@ import { TerminalView } from '@/components/terminal/TerminalView';
 import { NegotiationChatModal } from '@/components/modals/NegotiationChatModal';
 import { Wrench, Bus, AlertTriangle } from 'lucide-react';
 import { useAutoLocation } from '@/hooks/useAutoLocation';
+import { calculateDistanceMeters, formatDistance, getBearingDirectionLabel } from '@/utils/geo';
+import { DriverData } from '@/services/mockData';
 
 export const PassengerHome = () => {
   const { 
@@ -29,7 +31,9 @@ export const PassengerHome = () => {
     setActiveTab, addTripToHistory, resetRide,
     preferences,
     activeTransportMode, setActiveTransportMode,
-    urbanServiceType, setUrbanServiceType
+    urbanServiceType, setUrbanServiceType,
+    onlineDrivers, selectedDriverId, setSelectedDriverId,
+    triggerMapRecenter
   } = useAppStore();
 
   const { locationError, requestLocation } = useAutoLocation();
@@ -47,6 +51,11 @@ export const PassengerHome = () => {
 
   // Request GPS location on initial load or button tap
   const handleFetchLocation = () => {
+    haptics.selection();
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('ribergo:recenter_map'));
+    }
+    triggerMapRecenter();
     requestLocation();
   };
 
@@ -82,6 +91,11 @@ export const PassengerHome = () => {
       console.error('Request ride error:', err);
     }
   };
+
+  // Only real online drivers (100% real, no bots/mocks)
+  const selectedDriver: DriverData | null = 
+    onlineDrivers.find((d) => d.id === selectedDriverId) || null;
+
 
   // Select Destination
   const handleSelectDestination = (dest: DestinationOption) => {
@@ -320,14 +334,6 @@ export const PassengerHome = () => {
               <span className="text-gold-primary">GO</span>
             </span>
           </div>
-
-          <button
-            onClick={handleFetchLocation}
-            className="p-2.5 rounded-2xl bg-surface/90 border border-border-custom text-gold-primary hover:bg-surface backdrop-blur-md shadow-lg transition active:scale-95"
-            title="Recargar ubicación GPS"
-          >
-            <Navigation className="w-4 h-4" />
-          </button>
         </div>
 
         {/* Top Transport Mode Selector Pill */}
@@ -375,8 +381,20 @@ export const PassengerHome = () => {
         )}
       </div>
 
+      {/* FLOATING GPS RECENTER BUTTON (UBICACIÓN EN VIVO) */}
+      <div className="relative z-20 px-4 w-full max-w-[430px] mx-auto flex justify-end pointer-events-none mb-2.5 mt-auto">
+        <button
+          onClick={handleFetchLocation}
+          className="pointer-events-auto p-3.5 rounded-2xl bg-surface/95 border-2 border-gold-primary/60 text-gold-primary shadow-[0_12px_30px_rgba(0,0,0,0.85),0_0_20px_rgba(244,197,66,0.35)] backdrop-blur-xl flex items-center justify-center transition active:scale-90 hover:bg-surface hover:border-gold-primary group"
+          title="Centrar en mi ubicación GPS"
+          aria-label="Centrar en mi ubicación GPS"
+        >
+          <Navigation className="w-5 h-5 group-hover:scale-110 transition stroke-[2.3]" />
+        </button>
+      </div>
+
       {/* Bottom Sheet Panels */}
-      <div className="relative z-10 pb-safe px-4 pb-4 w-full max-w-[430px] mx-auto mt-auto">
+      <div className="relative z-10 pb-safe px-4 pb-4 w-full max-w-[430px] mx-auto">
         <AnimatePresence mode="wait">
           {/* STATE 1: IDLE / LOCATION_READY */}
           {(passengerState === 'IDLE' || passengerState === 'LOCATION_READY' || passengerState === 'LOCATION_LOADING') && (
@@ -749,6 +767,136 @@ export const PassengerHome = () => {
           )}
         </AnimatePresence>
       </div>
+
+      {/* SUPER ANIMATED DRIVER INSPECTION BUBBLE (Framer Motion) */}
+      <AnimatePresence>
+        {selectedDriver && (
+          <motion.div
+            initial={{ scale: 0.85, opacity: 0, y: 50 }}
+            animate={{ scale: 1, opacity: 1, y: 0 }}
+            exit={{ scale: 0.85, opacity: 0, y: 35 }}
+            transition={{ type: 'spring', damping: 22, stiffness: 350 }}
+            className="absolute inset-x-4 bottom-4 z-40 max-w-sm mx-auto pointer-events-auto"
+          >
+            <div className="relative p-4 rounded-3xl bg-surface/95 backdrop-blur-xl border-2 border-gold-primary/60 shadow-[0_20px_50px_rgba(0,0,0,0.85),0_0_30px_rgba(244,197,66,0.25)] text-white overflow-hidden space-y-3">
+              
+              {/* Gold Shimmer Ambient Aura */}
+              <div className="absolute top-0 right-0 w-36 h-36 bg-gold-primary/15 rounded-full blur-2xl pointer-events-none" />
+
+              {/* TOP HEADER: Estado En Línea y Vehículo */}
+              <div className="flex items-center justify-between pb-3 border-b border-border-custom/80">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-9 h-9 rounded-2xl bg-gradient-to-tr from-gold-primary/20 via-gold-primary/10 to-transparent border border-gold-primary/50 flex items-center justify-center text-gold-primary shadow-inner">
+                    <Bike className="w-5 h-5 stroke-[2.2]" />
+                  </div>
+                  <div>
+                    <span className="text-[9px] font-black text-gold-primary uppercase tracking-widest block">
+                      {selectedDriver.motorcycle ? 'Vehículo Registrado' : 'Conductor'}
+                    </span>
+                    <h4 className="text-sm font-black text-white tracking-wide">
+                      {selectedDriver.motorcycle || 'Mototaxi'}
+                    </h4>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  {selectedDriver.plate ? (
+                    <span className="px-2.5 py-1 rounded-xl bg-surface-2 border border-gold-primary/40 font-mono text-xs font-black text-gold-light tracking-wider shadow-sm">
+                      {selectedDriver.plate}
+                    </span>
+                  ) : (
+                    <span className="px-2.5 py-1 rounded-xl bg-emerald-500/15 border border-emerald-500/40 text-[10px] font-bold text-emerald-400 tracking-wide flex items-center gap-1 shadow-sm">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                      <span>En línea</span>
+                    </span>
+                  )}
+                  <button
+                    onClick={() => {
+                      haptics.selection();
+                      setSelectedDriverId(null);
+                    }}
+                    className="w-7 h-7 rounded-full bg-surface-2 hover:bg-gold-primary/20 text-text-secondary hover:text-white flex items-center justify-center transition active:scale-90"
+                    title="Cerrar"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+
+              {/* DRIVER INFO: Avatar con inicial real, Nombre, Clasificación real de su perfil, Viajes reales */}
+              <div className="flex items-center gap-3">
+                <div className="relative shrink-0">
+                  {selectedDriver.avatar && selectedDriver.avatar.startsWith('http') && !selectedDriver.avatar.includes('unsplash') ? (
+                    <img 
+                      src={selectedDriver.avatar} 
+                      alt={selectedDriver.name} 
+                      className="w-12 h-12 rounded-2xl object-cover border-2 border-gold-primary/50 shadow-md"
+                    />
+                  ) : (
+                    <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-gold-primary/30 to-surface-2 border-2 border-gold-primary/60 flex items-center justify-center text-gold-primary font-black text-lg shadow-md">
+                      {selectedDriver.name ? selectedDriver.name.charAt(0).toUpperCase() : 'C'}
+                    </div>
+                  )}
+                  <div className="w-3.5 h-3.5 rounded-full bg-emerald-500 border-2 border-surface absolute -bottom-0.5 -right-0.5 shadow-sm" />
+                </div>
+
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-1.5">
+                    <h5 className="font-bold text-sm text-white truncate">{selectedDriver.name || 'Conductor'}</h5>
+                    <ShieldCheck className="w-4 h-4 text-gold-primary shrink-0" />
+                  </div>
+                  <div className="flex items-center gap-2 mt-0.5 text-xs text-text-secondary">
+                    <span className="flex items-center gap-1 text-gold-primary font-bold">
+                      <Star className="w-3.5 h-3.5 fill-gold-primary" />
+                      <span>{selectedDriver.rating ? Number(selectedDriver.rating).toFixed(1) : '5.0'}</span>
+                    </span>
+                    <span>•</span>
+                    <span>{selectedDriver.trips ?? 0} viajes</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* REAL-TIME COMPASS & HEADING DIRECTION BADGE */}
+              <div className="p-2.5 rounded-2xl bg-surface-2/90 border border-border-custom flex items-center justify-between text-xs">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-7 h-7 rounded-xl bg-gold-primary/10 border border-gold-primary/30 flex items-center justify-center text-gold-primary shadow-sm">
+                    <Compass 
+                      className="w-4 h-4 transition-transform duration-500" 
+                      style={{ transform: `rotate(${selectedDriver.heading || 0}deg)` }}
+                    />
+                  </div>
+                  <div>
+                    <span className="text-[10px] text-text-secondary block">Rumbo en vivo</span>
+                    <span className="font-extrabold text-white text-[11px] flex items-center gap-1">
+                      <span>{getBearingDirectionLabel(selectedDriver.heading || 0)}</span>
+                      <span className="text-gold-light text-[10px]">({selectedDriver.heading || 0}°)</span>
+                      <span className="text-text-secondary text-[10px] font-normal">
+                        {selectedDriver.speed && selectedDriver.speed > 0 ? `• ${selectedDriver.speed} km/h` : '• En parada'}
+                      </span>
+                    </span>
+                  </div>
+                </div>
+
+                <div className="text-right">
+                  <span className="text-[10px] text-text-secondary block">Distancia</span>
+                  <span className="font-black text-gold-primary text-[11px]">
+                    {currentLocation 
+                      ? formatDistance(calculateDistanceMeters(currentLocation.lat, currentLocation.lng, selectedDriver.currentLocation.lat, selectedDriver.currentLocation.lng))
+                      : 'En Riberalta'}
+                  </span>
+                </div>
+              </div>
+
+              {/* STATUS INDICATOR (CONECTADO EN TIEMPO REAL - SIN BOTONES INNECESARIOS) */}
+              <div className="py-2.5 px-3 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center gap-2 text-xs font-bold text-emerald-400">
+                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                <span>Conductor en línea en tiempo real</span>
+              </div>
+
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* MODAL DE NEGOCIACIÓN EN TIEMPO REAL */}
       <NegotiationChatModal />

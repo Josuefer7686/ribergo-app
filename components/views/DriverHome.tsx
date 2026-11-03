@@ -24,7 +24,7 @@ export const DriverHome = () => {
     activeTrip, setActiveTrip,
     setActiveTab, addTripToHistory, preferences,
     setHasCompletedDriverTutorial, topUpWallet, deductWalletCommission,
-    decrementFreeTrips
+    decrementFreeTrips, triggerMapRecenter
   } = useAppStore();
 
   const [countdown, setCountdown] = useState(15);
@@ -33,9 +33,7 @@ export const DriverHome = () => {
   });
   const [showQrModal, setShowQrModal] = useState(false);
   const [lowBalanceBanner, setLowBalanceBanner] = useState(false);
-  const [isSimulatingMotion, setIsSimulatingMotion] = useState(false);
 
-  const simStepRef = useRef(0);
   const lastLocationRef = useRef<LocationPoint | null>(currentLocation);
   const isAcceptingRef = useRef(false);
   const driverStateRef = useRef(driverState);
@@ -76,11 +74,14 @@ export const DriverHome = () => {
   const walletBalance = user?.walletBalance ?? 0.0;
   const freeTrips = user?.freeTripsRemaining ?? 0;
 
-  const driverId = user?.id || 'drv-' + (user?.phone?.replace(/[^0-9]/g, '') || 'demo');
-  const driverName = user?.name || 'Carlos Mendoza';
-  const driverPhone = user?.phone || '+591 76543210';
-  const motorcycle = user?.motorcycle || 'Honda Wave 110';
+  const driverId = user?.id || (user?.phone ? 'drv-' + user.phone.replace(/[^0-9]/g, '') : 'drv-ribergo');
+  const driverName = user?.name || 'Conductor';
+  const driverPhone = user?.phone || '';
+  const motorcycle = user?.motorcycle || '';
   const plate = user?.plate || '';
+  const rating = user?.rating ?? 5.0;
+  const trips = user?.trips ?? 0;
+  const avatar = user?.avatar || '';
 
   // Check if first-time driver tutorial needs to open automatically
   useEffect(() => {
@@ -108,10 +109,35 @@ export const DriverHome = () => {
     }
   };
 
+  const getAccurateLocation = (): Promise<LocationPoint> => {
+    return new Promise((resolve) => {
+      if (typeof window === 'undefined' || !('geolocation' in navigator)) {
+        resolve(currentLocation || { lat: -11.0061, lng: -66.0747, name: 'Riberalta' });
+        return;
+      }
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          const freshLoc: LocationPoint = {
+            lat: pos.coords.latitude,
+            lng: pos.coords.longitude,
+            name: 'GPS en Vivo',
+            address: 'Ubicación actual exacta',
+          };
+          setCurrentLocation(freshLoc);
+          lastLocationRef.current = freshLoc;
+          resolve(freshLoc);
+        },
+        () => {
+          resolve(currentLocation || { lat: -11.0061, lng: -66.0747, name: 'Riberalta' });
+        },
+        { enableHighAccuracy: true, maximumAge: 0, timeout: 8000 }
+      );
+    });
+  };
+
   const toggleOnline = async () => {
     haptics.impact();
     const nextOnlineState = !isOnline;
-    const loc = currentLocation || { lat: -11.0061, lng: -66.0747, name: 'Riberalta Centro' };
 
     if (nextOnlineState) {
       // Check if driver has sufficient wallet balance or free gift trips to work
@@ -126,34 +152,24 @@ export const DriverHome = () => {
       setActiveTrip(null);
       setPendingRequest(null);
       setDriverState('ONLINE');
+
+      const loc = await getAccurateLocation();
       await apiService.setDriverOnlineStatus(
-        driverId, driverName, driverPhone, motorcycle, plate, 5.0, loc, true, 0, 0
+        driverId, driverName, driverPhone, motorcycle, plate, rating, loc, true, 0, 0, trips, avatar
       );
     } else {
-      setIsSimulatingMotion(false);
       setDriverState('OFFLINE');
       setPendingRequest(null);
+      const loc = currentLocation || { lat: -11.0061, lng: -66.0747, name: 'Riberalta Centro' };
       await apiService.setDriverOnlineStatus(
-        driverId, driverName, driverPhone, motorcycle, plate, 5.0, loc, false
+        driverId, driverName, driverPhone, motorcycle, plate, rating, loc, false, 0, 0, trips, avatar
       );
     }
   };
 
-  // Riberalta circuit waypoints for testing local movement & heading
-  const RIBERALTA_TEST_CIRCUIT: [number, number][] = [
-    [-11.0061, -66.0747], // Plaza 3 de Febrero
-    [-11.0048, -66.0741], // Calle Nicolás Suárez
-    [-11.0035, -66.0735], // Hacia Av. Beni
-    [-11.0022, -66.0722], // Av. Gabriel René Moreno
-    [-11.0035, -66.0708], // Hacia Mercado Central
-    [-11.0050, -66.0718], // Calle Plácido Méndez
-    [-11.0061, -66.0732], // Retorno Av. Alberto Reyes
-    [-11.0061, -66.0747], // Plaza 3 de Febrero
-  ];
-
-  // 1. Real GPS Location Tracker when ONLINE
+  // 1. Real GPS Location Tracker when ONLINE with Maximum Accuracy (100% Real GPS, No Simulation)
   useEffect(() => {
-    if (!isOnline || isSimulatingMotion || typeof window === 'undefined') return;
+    if (!isOnline || typeof window === 'undefined') return;
     if (!('geolocation' in navigator)) return;
 
     const watchId = navigator.geolocation.watchPosition(
@@ -173,7 +189,7 @@ export const DriverHome = () => {
             newCoords.lat,
             newCoords.lng
           );
-          if (dist >= 1.5) {
+          if (dist >= 1.0) {
             heading = calculateBearing(
               lastLocationRef.current.lat,
               lastLocationRef.current.lng,
@@ -189,36 +205,11 @@ export const DriverHome = () => {
         apiService.updateDriverLocation(driverId, newCoords, heading, speedKmh);
       },
       (err) => console.warn('Driver geolocation watch error:', err),
-      { enableHighAccuracy: true, maximumAge: 1000, timeout: 10000 }
+      { enableHighAccuracy: true, maximumAge: 0, timeout: 12000 }
     );
 
     return () => navigator.geolocation.clearWatch(watchId);
-  }, [isOnline, isSimulatingMotion, driverId, setCurrentLocation]);
-
-  // 2. Local Simulation Loop for Testing Movement & Heading (multi-tab / local testing)
-  useEffect(() => {
-    if (!isOnline || !isSimulatingMotion) return;
-
-    const interval = setInterval(() => {
-      simStepRef.current = (simStepRef.current + 1) % RIBERALTA_TEST_CIRCUIT.length;
-      const target = RIBERALTA_TEST_CIRCUIT[simStepRef.current];
-      const prevLoc = lastLocationRef.current || currentLocation || { lat: -11.0061, lng: -66.0747 };
-      const heading = calculateBearing(prevLoc.lat, prevLoc.lng, target[0], target[1]);
-
-      const newCoords: LocationPoint = {
-        lat: target[0],
-        lng: target[1],
-        name: 'Conductor en Movimiento',
-        address: 'Prueba de Ruta Local',
-      };
-
-      lastLocationRef.current = newCoords;
-      setCurrentLocation(newCoords);
-      apiService.updateDriverLocation(driverId, newCoords, heading, 22);
-    }, 2000);
-
-    return () => clearInterval(interval);
-  }, [isOnline, isSimulatingMotion, driverId, currentLocation, setCurrentLocation]);
+  }, [isOnline, driverId, setCurrentLocation]);
 
   // Subscribe to active trip updates (e.g. negotiation, payment, fare updates, or cancellation)
   useEffect(() => {
@@ -575,27 +566,6 @@ export const DriverHome = () => {
           </div>
         </div>
 
-        {/* Real-time Movement Tester Pill for Local Testing */}
-        {isOnline && (
-          <div className="flex items-center justify-end pointer-events-auto">
-            <button
-              onClick={() => {
-                haptics.selection();
-                audio.tabClick();
-                setIsSimulatingMotion(!isSimulatingMotion);
-              }}
-              className={`px-3 py-1.5 rounded-full text-[11px] font-black border flex items-center gap-1.5 shadow-lg backdrop-blur-md transition active:scale-95 ${
-                isSimulatingMotion 
-                  ? 'bg-amber-500/20 text-amber-300 border-amber-500/60 shadow-amber-500/20' 
-                  : 'bg-surface/90 text-text-secondary border-gold-primary/30 hover:text-white'
-              }`}
-            >
-              <Navigation className={`w-3.5 h-3.5 ${isSimulatingMotion ? 'animate-spin text-amber-400' : 'text-gold-primary'}`} />
-              <span>{isSimulatingMotion ? '🛵 Conduciendo ruta de prueba...' : '⚡ Probar movimiento en vivo'}</span>
-            </button>
-          </div>
-        )}
-
         {/* Low balance warning floating banner (solo si no tiene saldo Y tampoco tiene viajes gratis) */}
         {lowBalanceBanner && walletBalance <= 0 && freeTrips <= 0 && (
           <div className="pointer-events-auto max-w-[430px] mx-auto p-3 rounded-2xl bg-rose-500/90 text-white text-xs font-semibold flex items-center justify-between shadow-xl backdrop-blur-md animate-bounce">
@@ -613,8 +583,26 @@ export const DriverHome = () => {
         )}
       </div>
 
+      {/* FLOATING GPS RECENTER BUTTON FOR DRIVER */}
+      <div className="relative z-20 px-4 w-full max-w-[430px] mx-auto flex justify-end pointer-events-none mb-2.5 mt-auto">
+        <button
+          onClick={() => {
+            haptics.selection();
+            if (typeof window !== 'undefined') {
+              window.dispatchEvent(new CustomEvent('ribergo:recenter_map'));
+            }
+            triggerMapRecenter();
+          }}
+          className="pointer-events-auto p-3.5 rounded-2xl bg-surface/95 border-2 border-gold-primary/60 text-gold-primary shadow-[0_12px_30px_rgba(0,0,0,0.85),0_0_20px_rgba(244,197,66,0.35)] backdrop-blur-xl flex items-center justify-center transition active:scale-90 hover:bg-surface hover:border-gold-primary group"
+          title="Centrar en mi ubicación GPS"
+          aria-label="Centrar en mi ubicación GPS"
+        >
+          <Navigation className="w-5 h-5 group-hover:scale-110 transition stroke-[2.3]" />
+        </button>
+      </div>
+
       {/* Bottom Floating Cards */}
-      <div className="relative z-10 pb-safe px-4 pb-4 w-full max-w-[430px] mx-auto mt-auto">
+      <div className="relative z-10 pb-safe px-4 pb-4 w-full max-w-[430px] mx-auto">
         <AnimatePresence mode="wait">
           {/* OFFLINE */}
           {driverState === 'OFFLINE' && (
