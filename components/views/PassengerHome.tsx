@@ -82,7 +82,7 @@ export const PassengerHome = () => {
     setPassengerState('SEARCHING_DRIVER');
 
     const pickupLoc = currentLocation || { lat: -11.0061, lng: -66.0747, name: 'Mi Ubicación' };
-    const destLoc = { lat: 0, lng: 0, name: 'Coordinar destino en chat', isCustom: true, id: 'custom-destination' };
+    const destLoc = { lat: -11.0061, lng: -66.0747, name: 'Acordar en chat / en persona' };
     const passengerId = user?.id || 'usr-anon';
     const passengerName = user?.name || 'Pasajero RiberGO';
     const initialPrice = urbanServiceType === 'REMOLCADA' ? 15 : 10;
@@ -214,7 +214,7 @@ export const PassengerHome = () => {
     setPassengerState('SEARCHING_DRIVER');
 
     const pickupLoc = currentLocation || { lat: -11.0061, lng: -66.0747, name: 'Mi Ubicación' };
-    const destLoc = destination || { lat: 0, lng: 0, name: 'Coordinar destino en chat', isCustom: true, id: 'custom-destination' };
+    const destLoc = destination || { lat: -11.0061, lng: -66.0747, name: 'Acordar en chat / en persona' };
     const passengerId = user?.id || 'usr-anon';
     const passengerName = user?.name || 'Pasajero RiberGO';
     const finalFare = currentOfferFare;

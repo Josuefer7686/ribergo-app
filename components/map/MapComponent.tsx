@@ -251,28 +251,8 @@ export default function MapComponent() {
       routeTarget = currentLocation 
         ? [currentLocation.lat, currentLocation.lng] 
         : (activeTrip?.pickup ? [activeTrip.pickup.lat, activeTrip.pickup.lng] : null);
-    } else if (passengerState === 'TRIP_STARTED') {
-      // Passenger picked up! Route towards destination ONLY if recognized place and not custom
-      const dest = activeTrip?.destination || destination;
-      const isCustomDest = Boolean(
-        dest?.isCustom ||
-        !dest?.lat ||
-        !dest?.lng ||
-        dest?.lat === 0 ||
-        dest?.id === 'in-person' ||
-        dest?.id === 'custom-destination' ||
-        dest?.name?.toLowerCase().includes('acordar') ||
-        dest?.name?.toLowerCase().includes('personalizado') ||
-        dest?.name?.toLowerCase().includes('coordinar')
-      );
-
-      if (dest?.lat && dest?.lng && !isCustomDest) {
-        routeOrigin = liveAssignedDriver?.currentLocation 
-          ? [liveAssignedDriver.currentLocation.lat, liveAssignedDriver.currentLocation.lng]
-          : (currentLocation ? [currentLocation.lat, currentLocation.lng] : null);
-        routeTarget = [dest.lat, dest.lng];
-      }
     }
+    // Durante TRIP_STARTED no se traza ruta fija en el mapa (se coordina en persona)
   } else if (role === 'DRIVER') {
     if (driverState === 'RIDE_REQUEST' && pendingRequest?.pickup && currentLocation) {
       // 🌟 DRIVER SEES INCOMING TRIP: Trace route from driver's GPS to passenger pickup!
@@ -282,26 +262,8 @@ export default function MapComponent() {
       // Driver accepted and is navigating to passenger's pickup location
       routeOrigin = [currentLocation.lat, currentLocation.lng];
       routeTarget = [activeTrip.pickup.lat, activeTrip.pickup.lng];
-    } else if (driverState === 'TRIP_STARTED' && currentLocation) {
-      // 🌟 TRIP STARTED: Route to destination ONLY if recognized place and not custom
-      const tripDest = activeTrip?.destination || destination;
-      const isCustomDest = Boolean(
-        tripDest?.isCustom ||
-        !tripDest?.lat ||
-        !tripDest?.lng ||
-        tripDest?.lat === 0 ||
-        tripDest?.id === 'in-person' ||
-        tripDest?.id === 'custom-destination' ||
-        tripDest?.name?.toLowerCase().includes('acordar') ||
-        tripDest?.name?.toLowerCase().includes('personalizado') ||
-        tripDest?.name?.toLowerCase().includes('coordinar')
-      );
-
-      if (tripDest?.lat && tripDest?.lng && !isCustomDest) {
-        routeOrigin = [currentLocation.lat, currentLocation.lng];
-        routeTarget = [tripDest.lat, tripDest.lng];
-      }
     }
+    // Durante TRIP_STARTED no se traza ruta fija en el mapa
   }
 
   // Live street turn-by-turn route state
@@ -395,11 +357,10 @@ export default function MapComponent() {
           />
         )}
         
-        {/* Destination Location Marker */}
-        {((role === 'PASSENGER' && destination?.lat && destination?.lng) || 
-          (routeTarget && (passengerState === 'TRIP_STARTED' || driverState === 'TRIP_STARTED'))) && (
+        {/* Destination Location Marker (solo en confirmación previa de pasajero) */}
+        {role === 'PASSENGER' && passengerState === 'CONFIRMING' && destination?.lat && destination?.lng && (
           <Marker 
-            position={routeTarget || [destination!.lat, destination!.lng]} 
+            position={[destination.lat, destination.lng]} 
             icon={getDestIcon(markerScale)} 
           />
         )}

@@ -1,41 +1,48 @@
 'use client';
 
-import { useState, useRef, useEffect, useMemo } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { useAppStore } from '@/store/useAppStore';
 import { 
-  Send, Sparkles, MapPin, DollarSign, Check, X, 
-  Bike, User, ChevronRight, Plus, Minus
+  Send, Sparkles, DollarSign, Check, X, 
+  Bike, User, Plus, Minus
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { haptics } from '@/utils/haptics';
 import { audio } from '@/utils/audio';
 import { apiService } from '@/services/apiService';
-import { 
-  searchRiberaltaLocations, 
-  createCustomDestination, 
-  RiberaltaPlace,
-  RIBERALTA_PLACES 
-} from '@/utils/riberaltaPlaces';
 
-// Destinos populares directos para chips rápidos iniciales
-const POPULAR_QUICK_PLACES = [
-  'Los Almendros',
-  'Final Jacarandá',
-  'Mercado Central',
-  'Hospital General',
-  'Barrio Los Tajibos',
-  'Concesión Forestal',
-  'Terminal de Buses',
-  'Barrio San José',
+// Mensajes predefinidos y ubicaciones frecuentes para el Pasajero
+const PASSENGER_QUICK_CHIPS = [
+  '📍 Final Jacarandá',
+  '📍 Barrio Concesión Forestal',
+  '📍 Barrio Los Tajibos',
+  '📍 Hospital General',
+  '📍 Mercado Central',
+  '📍 Aeropuerto',
+  '📍 Terminal de Buses',
+  '📍 Barrio Los Almendros',
+  '📍 Barrio San José',
+  '💬 ¿Cuánto me cobras pariente?',
+  '💬 Te espero en la esquina',
+  '💬 ¿Ya vienes?',
+];
+
+// Mensajes predefinidos para el Conductor
+const DRIVER_QUICK_CHIPS = [
+  '💬 ¿A qué barrio vamos pariente?',
+  '💬 Hasta allá son 15 Bs camba',
+  '💬 ¿Cerca o lejos?',
+  '💬 ¡Ya voy saliendo!',
+  '💬 ¿Dónde te espero?',
+  '💬 Voy en camino pariente 🏍️',
+  '💬 Trato hecho, ya llego',
 ];
 
 export const NegotiationChatModal = () => {
   const { 
-    user, 
     role, 
     activeTrip, 
     setActiveTrip, 
-    setDestination,
     passengerState, 
     setPassengerState,
     driverState, 
@@ -50,7 +57,6 @@ export const NegotiationChatModal = () => {
   const [inputMessage, setInputMessage] = useState('');
   const [viewportHeight, setViewportHeight] = useState<number | null>(null);
   const [showCupertinoCancelModal, setShowCupertinoCancelModal] = useState(false);
-  const [showPlaceSuggestions, setShowPlaceSuggestions] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   // Escuchar únicamente resize del visualViewport móvil
@@ -92,22 +98,11 @@ export const NegotiationChatModal = () => {
     ? adjustedFare 
     : (activeTrip?.proposedPrice || activeTrip?.price || 10);
 
-  const hasSentGreetingRef = useRef(false);
-
   // Suscribirse a mensajes del chat
   useEffect(() => {
     if (!rideId) return;
     const unsubscribe = apiService.subscribeToMessages(rideId, (msgs) => {
       setChatMessages(msgs);
-      // Saludo automático garantizado del conductor preguntando el destino
-      if ((!msgs || msgs.length === 0) && !hasSentGreetingRef.current) {
-        hasSentGreetingRef.current = true;
-        apiService.sendMessage(
-          rideId, 
-          'DRIVER', 
-          '¡Buenas pariente! ¿A qué lugar o calle vamos? 📍'
-        );
-      }
     });
     return () => unsubscribe();
   }, [rideId, setChatMessages]);
@@ -117,95 +112,15 @@ export const NegotiationChatModal = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [chatMessages.length]);
 
-  // Detección: ¿El pasajero ya respondió indicando su destino?
-  // Solo se activa la búsqueda inteligente al responder al primer mensaje
-  const hasPassengerResponded = useMemo(() => {
-    return chatMessages.some((m) => m.sender === 'PASSENGER');
-  }, [chatMessages]);
-
-  const isFirstDestinationResponse = isPassenger && !hasPassengerResponded;
-
-  // Lugares sugeridos en Riberalta en tiempo real según lo que escribe el pasajero
-  const matchedPlaces = useMemo(() => {
-    if (!isFirstDestinationResponse || !inputMessage.trim()) return [];
-    return searchRiberaltaLocations(inputMessage);
-  }, [isFirstDestinationResponse, inputMessage]);
-
   if (!isNegotiating || !activeTrip) return null;
 
-  // 1. Seleccionar un lugar reconocido con coordenadas exactas de Riberalta
-  const handleSelectPlaceDestination = (place: RiberaltaPlace) => {
-    if (!rideId) return;
-    haptics.selection();
-    setShowPlaceSuggestions(false);
-    setInputMessage('');
-
-    const destObj = {
-      id: place.id,
-      name: place.name,
-      address: place.address,
-      lat: place.lat,
-      lng: place.lng,
-      isCustom: false,
-    };
-
-    // Actualizar destino en viaje y store
-    setDestination(destObj);
-    setActiveTrip({
-      ...activeTrip,
-      destination: destObj,
-    });
-    apiService.updateRideDestination(rideId, destObj);
-
-    // Enviar mensaje en chat
-    apiService.sendMessage(rideId, 'PASSENGER', `📍 Voy a: ${place.name} (${place.address})`);
-  };
-
-  // 2. Marcar como destino personalizado (no encontrado o coordinar en persona) -> NO traza ruta en mapa
-  const handleSelectCustomDestination = (customName: string) => {
-    if (!rideId) return;
-    haptics.selection();
-    setShowPlaceSuggestions(false);
-    setInputMessage('');
-
-    const customDest = createCustomDestination(customName);
-
-    // Actualizar destino en viaje y store
-    setDestination(customDest);
-    setActiveTrip({
-      ...activeTrip,
-      destination: customDest,
-    });
-    apiService.updateRideDestination(rideId, customDest);
-
-    // Enviar mensaje en chat
-    apiService.sendMessage(
-      rideId, 
-      'PASSENGER', 
-      `📍 Destino personalizado: "${customDest.name}" (Coordinar en persona)`
-    );
-  };
-
-  // 3. Enviar mensaje regular (o procesar destino inicial si aún no se respondió)
+  // Enviar mensaje de texto
   const handleSendMessage = (textToSend?: string) => {
     const text = (textToSend || inputMessage).trim();
     if (!text || !rideId) return;
 
-    if (isFirstDestinationResponse) {
-      // Si aún no ha respondido al destino: buscar coincidencia o marcar personalizado
-      const matches = searchRiberaltaLocations(text);
-      if (matches.length > 0) {
-        handleSelectPlaceDestination(matches[0]);
-      } else {
-        handleSelectCustomDestination(text);
-      }
-      return;
-    }
-
-    // Mensaje de texto conversacional estándar
     haptics.selection();
     setInputMessage('');
-    setShowPlaceSuggestions(false);
     apiService.sendMessage(rideId, myRole, text);
   };
 
@@ -348,6 +263,7 @@ export const NegotiationChatModal = () => {
 
             {/* BOTÓN CANCELAR / DEJAR */}
             <button
+              type="button"
               onClick={() => {
                 if (isPassenger) {
                   setShowCupertinoCancelModal(true);
@@ -411,11 +327,11 @@ export const NegotiationChatModal = () => {
           <div className="p-3 rounded-2xl bg-surface/60 border border-border-custom text-center space-y-1">
             <p className="text-xs font-bold text-white flex items-center justify-center gap-1.5">
               <Sparkles className="w-3.5 h-3.5 text-gold-primary" />
-              <span>Coordinen el destino y el pasaje</span>
+              <span>Regateo y coordinación del viaje</span>
             </p>
             <p className="text-[10px] text-text-secondary">
               {isPassenger 
-                ? 'Indica a qué lugar o calle vas. Si está en el mapa se trazará la ruta; si no, será destino personalizado.' 
+                ? 'Coordina tu destino y pasaje con el conductor. Solo el conductor puede iniciar el viaje.' 
                 : 'El conductor tiene el mando para aceptar e iniciar el viaje cuando ambos estén conformes.'}
             </p>
           </div>
@@ -451,142 +367,61 @@ export const NegotiationChatModal = () => {
 
         {/* CONTROLES INFERIORES */}
         <div className={`p-3 bg-surface border-t border-border-custom space-y-2 shrink-0 ${viewportHeight && viewportHeight < 550 ? 'pb-2' : 'pb-safe'}`}>
-          {/* Chips iniciales de destinos populares (solo en primera respuesta del pasajero) */}
-          {isFirstDestinationResponse && (
-            <div className="space-y-1">
-              <span className="text-[10px] font-bold text-text-secondary uppercase tracking-wider flex items-center gap-1">
-                <MapPin className="w-3 h-3 text-gold-primary" />
-                Destinos frecuentes en Riberalta:
-              </span>
-              <div className="flex gap-1.5 overflow-x-auto pb-1 no-scrollbar">
-                {POPULAR_QUICK_PLACES.map((placeName) => {
-                  const placeMatch = RIBERALTA_PLACES.find(p => p.name.includes(placeName));
-                  return (
-                    <button
-                      key={placeName}
-                      type="button"
-                      onClick={() => {
-                        if (placeMatch) {
-                          handleSelectPlaceDestination(placeMatch);
-                        } else {
-                          handleSelectCustomDestination(placeName);
-                        }
-                      }}
-                      className="px-2.5 py-1.5 rounded-xl bg-surface-2 hover:bg-surface border border-gold-primary/30 text-white font-bold text-[11px] whitespace-nowrap active:scale-95 transition shrink-0"
-                    >
-                      📍 {placeName}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-
-          {/* Input de texto con Autocompletado de Destinos (solo en primer mensaje) */}
-          <div className="relative">
-            {/* Popover con sugerencias de lugares en tiempo real */}
-            {isFirstDestinationResponse && showPlaceSuggestions && inputMessage.trim().length > 0 && (
-              <div className="absolute bottom-full left-0 right-0 mb-2 p-1.5 bg-[#0A0D12]/98 border-2 border-gold-primary/50 rounded-2xl shadow-2xl backdrop-blur-2xl max-h-52 overflow-y-auto space-y-1 z-30 animate-in fade-in zoom-in-95 duration-150">
-                <div className="px-2 py-1 text-[10px] font-black text-gold-primary uppercase tracking-wider flex items-center justify-between border-b border-border-custom pb-1.5 mb-1">
-                  <span>Lugares en Riberalta</span>
-                  <span>Toca para elegir</span>
-                </div>
-
-                {matchedPlaces.map((place) => (
-                  <button
-                    key={place.id}
-                    type="button"
-                    onClick={() => handleSelectPlaceDestination(place)}
-                    className="w-full text-left p-2 rounded-xl bg-surface-2 hover:bg-gold-primary/10 hover:border-gold-primary/40 border border-transparent transition flex items-center justify-between group active:scale-[0.99]"
-                  >
-                    <div className="flex items-center gap-2">
-                      <div className="w-6 h-6 rounded-lg bg-gold-primary/20 text-gold-primary flex items-center justify-center shrink-0">
-                        <MapPin className="w-3.5 h-3.5" />
-                      </div>
-                      <div>
-                        <p className="text-xs font-bold text-white group-hover:text-gold-primary transition">{place.name}</p>
-                        <p className="text-[10px] text-text-secondary">{place.address}</p>
-                      </div>
-                    </div>
-                    <ChevronRight className="w-4 h-4 text-text-secondary group-hover:text-gold-primary transition" />
-                  </button>
-                ))}
-
-                {/* Opción Destino Personalizado si no está en la base de datos */}
-                <button
-                  type="button"
-                  onClick={() => handleSelectCustomDestination(inputMessage)}
-                  className="w-full text-left p-2 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 transition flex items-center gap-2 text-amber-300 active:scale-[0.99]"
-                >
-                  <MapPin className="w-4 h-4 text-amber-400 shrink-0" />
-                  <div>
-                    <p className="text-xs font-black text-white">Destino personalizado</p>
-                    <p className="text-[10px] text-amber-300">
-                      Marcar &quot;{inputMessage.trim()}&quot; (Coordinar en persona)
-                    </p>
-                  </div>
-                </button>
-              </div>
-            )}
-
-            <div className="flex items-center gap-2">
-              <input
-                type="text"
-                value={inputMessage}
-                onChange={(e) => {
-                  setInputMessage(e.target.value);
-                  if (isFirstDestinationResponse) {
-                    setShowPlaceSuggestions(true);
-                  }
-                }}
-                onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()}
-                onFocus={() => {
-                  if (isFirstDestinationResponse) setShowPlaceSuggestions(true);
-                  setTimeout(() => {
-                    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-                  }, 200);
-                }}
-                placeholder={
-                  isFirstDestinationResponse 
-                    ? '¿A dónde vas? (ej: Los Almendros, Hospital)...' 
-                    : isPassenger 
-                    ? 'Escribe tu mensaje al conductor...' 
-                    : 'Escribe tu respuesta camba...'
-                }
-                className="flex-1 bg-surface-2 border border-border-custom rounded-2xl py-3 px-4 text-white placeholder-text-secondary focus:outline-none focus:border-gold-primary transition"
-                style={{
-                  fontSize: '16px',
-                  userSelect: 'text',
-                  WebkitUserSelect: 'text',
-                }}
-                autoComplete="off"
-                autoCorrect="on"
-              />
-
+          {/* Chips de mensajes rápidos según el rol */}
+          <div className="flex gap-1.5 overflow-x-auto pb-1 no-scrollbar">
+            {(isPassenger ? PASSENGER_QUICK_CHIPS : DRIVER_QUICK_CHIPS).map((phrase) => (
               <button
-                onClick={() => handleSendMessage()}
-                disabled={!inputMessage.trim()}
-                className="w-11 h-11 rounded-2xl bg-gold-primary hover:bg-gold-light disabled:opacity-40 text-background flex items-center justify-center transition active:scale-95 shadow-md shadow-gold-primary/20 shrink-0"
+                key={phrase}
+                type="button"
+                onClick={() => handleSendMessage(phrase)}
+                className="px-2.5 py-1.5 rounded-xl bg-surface-2 hover:bg-surface border border-gold-primary/30 text-white font-bold text-[11px] whitespace-nowrap active:scale-95 transition shrink-0"
               >
-                <Send className="w-5 h-5 stroke-[2.5]" />
+                {phrase}
               </button>
-            </div>
+            ))}
+          </div>
+
+          {/* Input de texto y botón enviar */}
+          <div className="flex items-center gap-2">
+            <input
+              type="text"
+              value={inputMessage}
+              onChange={(e) => setInputMessage(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()}
+              onFocus={() => {
+                setTimeout(() => {
+                  messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+                }, 200);
+              }}
+              placeholder={isPassenger ? 'Escribe tu mensaje al conductor...' : 'Escribe tu respuesta camba...'}
+              className="flex-1 bg-surface-2 border border-border-custom rounded-2xl py-3 px-4 text-white placeholder-text-secondary focus:outline-none focus:border-gold-primary transition"
+              style={{
+                fontSize: '16px',
+                userSelect: 'text',
+                WebkitUserSelect: 'text',
+              }}
+              autoComplete="off"
+              autoCorrect="on"
+            />
+
+            <button
+              onClick={() => handleSendMessage()}
+              disabled={!inputMessage.trim()}
+              className="w-11 h-11 rounded-2xl bg-gold-primary hover:bg-gold-light disabled:opacity-40 text-background flex items-center justify-center transition active:scale-95 shadow-md shadow-gold-primary/20 shrink-0"
+            >
+              <Send className="w-5 h-5 stroke-[2.5]" />
+            </button>
           </div>
 
           {/* BOTÓN INFERIOR: EXCLUSIVO DEL CONDUCTOR */}
-          {!isPassenger ? (
+          {!isPassenger && (
             <button
               onClick={handleAcceptFareAndStart}
               className="w-full py-3.5 bg-gradient-to-r from-gold-primary to-amber-400 text-background rounded-2xl font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 shadow-xl shadow-gold-primary/25 transition active:scale-[0.98]"
             >
               <Check className="w-4 h-4 stroke-[3]" />
-              <span>Aceptar e Iniciar Viaje por {localFare} BOB</span>
+              <span>Confirmar e Iniciar Viaje por {localFare} BOB</span>
             </button>
-          ) : (
-            <div className="py-2.5 px-3 rounded-2xl bg-surface-2/80 border border-border-custom text-center text-xs text-text-secondary flex items-center justify-center gap-2">
-              <span className="w-2 h-2 rounded-full bg-gold-primary animate-ping" />
-              <span>Esperando que el conductor acepte e inicie el viaje ({localFare} BOB)...</span>
-            </div>
           )}
         </div>
       </motion.div>
