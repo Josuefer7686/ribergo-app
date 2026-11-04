@@ -252,9 +252,21 @@ export default function MapComponent() {
         ? [currentLocation.lat, currentLocation.lng] 
         : (activeTrip?.pickup ? [activeTrip.pickup.lat, activeTrip.pickup.lng] : null);
     } else if (passengerState === 'TRIP_STARTED') {
-      // Passenger picked up! Route towards destination
+      // Passenger picked up! Route towards destination ONLY if recognized place and not custom
       const dest = activeTrip?.destination || destination;
-      if (dest?.lat && dest?.lng) {
+      const isCustomDest = Boolean(
+        dest?.isCustom ||
+        !dest?.lat ||
+        !dest?.lng ||
+        dest?.lat === 0 ||
+        dest?.id === 'in-person' ||
+        dest?.id === 'custom-destination' ||
+        dest?.name?.toLowerCase().includes('acordar') ||
+        dest?.name?.toLowerCase().includes('personalizado') ||
+        dest?.name?.toLowerCase().includes('coordinar')
+      );
+
+      if (dest?.lat && dest?.lng && !isCustomDest) {
         routeOrigin = liveAssignedDriver?.currentLocation 
           ? [liveAssignedDriver.currentLocation.lat, liveAssignedDriver.currentLocation.lng]
           : (currentLocation ? [currentLocation.lat, currentLocation.lng] : null);
@@ -271,9 +283,21 @@ export default function MapComponent() {
       routeOrigin = [currentLocation.lat, currentLocation.lng];
       routeTarget = [activeTrip.pickup.lat, activeTrip.pickup.lng];
     } else if (driverState === 'TRIP_STARTED' && currentLocation) {
-      // 🌟 TRIP STARTED: Driver picked up passenger, route stays visible all the way to destination!
+      // 🌟 TRIP STARTED: Route to destination ONLY if recognized place and not custom
       const tripDest = activeTrip?.destination || destination;
-      if (tripDest?.lat && tripDest?.lng) {
+      const isCustomDest = Boolean(
+        tripDest?.isCustom ||
+        !tripDest?.lat ||
+        !tripDest?.lng ||
+        tripDest?.lat === 0 ||
+        tripDest?.id === 'in-person' ||
+        tripDest?.id === 'custom-destination' ||
+        tripDest?.name?.toLowerCase().includes('acordar') ||
+        tripDest?.name?.toLowerCase().includes('personalizado') ||
+        tripDest?.name?.toLowerCase().includes('coordinar')
+      );
+
+      if (tripDest?.lat && tripDest?.lng && !isCustomDest) {
         routeOrigin = [currentLocation.lat, currentLocation.lng];
         routeTarget = [tripDest.lat, tripDest.lng];
       }

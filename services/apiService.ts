@@ -1114,10 +1114,51 @@ export const apiService = {
   },
 
   /**
+   * Update ride destination with real coordinates or custom destination flag
+   */
+  async updateRideDestination(rideId: string, destination: any) {
+    const current = realtimeSyncBus.getRide(rideId) || {};
+    const updatePayload: any = {
+      ...current,
+      id: rideId,
+      destination,
+      updatedAtMs: Date.now(),
+    };
+    realtimeSyncBus.saveRide(updatePayload);
+
+    if (isFirebaseConfigured()) {
+      try {
+        await updateDoc(doc(db, 'active_requests', rideId), {
+          destination,
+          updatedAt: serverTimestamp(),
+        }).catch(() => {});
+        await updateDoc(doc(db, 'rides', rideId), {
+          destination,
+          updatedAt: serverTimestamp(),
+        }).catch(() => {});
+      } catch (err) {
+        console.warn('Firestore Update Destination Error:', err);
+      }
+    }
+  },
+
+  /**
    * Confirm the negotiated fare and start going to passenger
    */
-  async confirmRideFare(rideId: string, finalPrice: number, finalDestination?: string) {
+  async confirmRideFare(rideId: string, finalPrice: number, finalDestination?: string | any) {
     const current = realtimeSyncBus.getRide(rideId) || {};
+    let destObj = current.destination;
+    if (finalDestination) {
+      if (typeof finalDestination === 'object') {
+        destObj = finalDestination;
+      } else if (typeof finalDestination === 'string') {
+        destObj = {
+          ...(current.destination || { lat: -11.0061, lng: -66.0747 }),
+          name: finalDestination,
+        };
+      }
+    }
+
     const updatePayload: any = {
       ...current,
       id: rideId,
@@ -1125,14 +1166,9 @@ export const apiService = {
       proposedPrice: finalPrice,
       fareAgreed: true,
       status: 'GOING_TO_PASSENGER',
+      destination: destObj,
       updatedAtMs: Date.now(),
     };
-    if (finalDestination) {
-      updatePayload.destination = {
-        ...(current.destination || { lat: -11.0061, lng: -66.0747 }),
-        name: finalDestination,
-      };
-    }
 
     realtimeSyncBus.saveRide(updatePayload);
 
@@ -1145,8 +1181,8 @@ export const apiService = {
           status: 'GOING_TO_PASSENGER',
           updatedAt: serverTimestamp(),
         };
-        if (finalDestination) {
-          updateData['destination.name'] = finalDestination;
+        if (destObj) {
+          updateData.destination = destObj;
         }
         await updateDoc(doc(db, 'active_requests', rideId), updateData).catch(() => {});
         await updateDoc(doc(db, 'rides', rideId), updateData).catch(() => {});

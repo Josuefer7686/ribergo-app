@@ -32,6 +32,8 @@ export type LocationPoint = {
   address?: string;
   heading?: number;
   speed?: number;
+  isCustom?: boolean;
+  id?: string;
 };
 
 export type UserProfile = {
