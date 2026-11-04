@@ -160,26 +160,25 @@ export const PassengerHome = () => {
       } else if (rideData.status === 'SEARCHING_DRIVER') {
         setPassengerState('SEARCHING_DRIVER');
       } else if (rideData.status === 'TRIP_STARTED') {
-        if (rideData.paymentStatus) {
-          setActiveTrip({
-            ...(activeTrip || {}),
-            ...rideData,
-          });
-        }
+        setActiveTrip({
+          ...(activeTrip || {}),
+          ...rideData,
+        });
         setPassengerState('TRIP_STARTED');
       } else if (rideData.status === 'COMPLETED') {
-        if (rideData.paymentStatus) {
-          setActiveTrip({
-            ...(activeTrip || {}),
-            ...rideData,
-          });
-        }
+        setActiveTrip({
+          ...(activeTrip || {}),
+          ...rideData,
+        });
         setPassengerState('TRIP_COMPLETED');
+      } else if (rideData.status === 'CANCELLED') {
+        haptics.notification();
+        resetRide();
       }
     });
 
     return () => unsubscribe();
-  }, [activeTrip?.id, setActiveTrip, setAssignedDriver, setPassengerState, currentLocation, selectedPaymentMethod]);
+  }, [activeTrip?.id, setActiveTrip, setAssignedDriver, setPassengerState, currentLocation, selectedPaymentMethod, resetRide, activeTrip]);
 
   // Confirm Mototaxi
   const handleConfirmBooking = async () => {
@@ -222,13 +221,17 @@ export const PassengerHome = () => {
     }
   };
 
-  // Passenger manually triggers start/finish if testing solo
-  const handleStartTripSimulation = async () => {
-    haptics.heavy();
-    audio.passengerDriverArrived();
-    setPassengerState('TRIP_STARTED');
-    if (activeTrip?.id) {
-      await apiService.updateRideStatus(activeTrip.id, 'TRIP_STARTED');
+  // Cancel active ride (passenger only cancels/exits; driver controls start/finish)
+  const handleCancelActiveRide = async () => {
+    haptics.notification();
+    const tripId = activeTrip?.id;
+    resetRide();
+    if (tripId) {
+      try {
+        await apiService.cancelRideRequest(tripId);
+      } catch (err) {
+        console.error('Error cancelling ride:', err);
+      }
     }
   };
 
@@ -588,22 +591,28 @@ export const PassengerHome = () => {
                 </div>
               </div>
 
-              {/* Action Buttons: ONLY Chat button (NO Call button as requested) */}
-              <div className="grid grid-cols-2 gap-3 pt-2">
+              {/* Driver En Route Status Notice */}
+              <div className="flex items-center gap-2 p-2.5 rounded-xl bg-gold-primary/10 border border-gold-primary/20 text-xs text-gold-primary">
+                <Bike className="w-4 h-4 shrink-0 animate-bounce text-gold-primary" />
+                <span className="font-medium text-[11px] leading-tight">El conductor va en camino a recogerte. El conductor iniciará el viaje.</span>
+              </div>
+
+              {/* Action Buttons: Chat & Cancel (Passenger can only chat or cancel; driver starts the ride) */}
+              <div className="grid grid-cols-2 gap-3 pt-1">
                 <button
                   onClick={() => setActiveTab('MESSAGES')}
-                  className="py-3 bg-surface-2 hover:bg-surface border border-gold-primary/40 text-gold-primary rounded-xl font-bold text-xs flex items-center justify-center gap-2 transition"
+                  className="py-3 bg-surface-2 hover:bg-surface border border-gold-primary/40 text-gold-primary rounded-xl font-bold text-xs flex items-center justify-center gap-2 transition active:scale-95"
                 >
                   <MessageSquare className="w-4 h-4" />
                   <span>Mensaje</span>
                 </button>
 
                 <button
-                  onClick={handleStartTripSimulation}
-                  className="py-3 bg-gold-primary hover:bg-gold-light text-background rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 shadow-lg shadow-gold-primary/20 transition"
+                  onClick={handleCancelActiveRide}
+                  className="py-3 bg-rose-500/15 hover:bg-rose-500/25 border border-rose-500/30 text-rose-400 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 transition active:scale-95"
                 >
-                  <span>Iniciar Viaje</span>
-                  <ChevronRight className="w-4 h-4" />
+                  <X className="w-4 h-4" />
+                  <span>Cancelar viaje</span>
                 </button>
               </div>
             </motion.div>
@@ -631,20 +640,28 @@ export const PassengerHome = () => {
                 <p className="text-text-secondary">Tarifa acordada: <span className="text-gold-primary font-bold">{activeTrip?.price || 8} BOB</span></p>
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
+              {/* Trip In Progress Notice */}
+              <div className="flex items-center gap-2 p-2.5 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-xs text-emerald-400">
+                <Check className="w-4 h-4 shrink-0 text-emerald-400" />
+                <span className="font-medium text-[11px] leading-tight">En viaje con el conductor. Al llegar, el conductor finalizará el viaje.</span>
+              </div>
+
+              {/* Action Buttons: Chat & Cancel/Exit */}
+              <div className="grid grid-cols-2 gap-3 pt-1">
                 <button
                   onClick={() => setActiveTab('MESSAGES')}
-                  className="py-3 bg-surface-2 hover:bg-surface border border-gold-primary/40 text-gold-primary rounded-xl font-bold text-xs flex items-center justify-center gap-2 transition"
+                  className="py-3 bg-surface-2 hover:bg-surface border border-gold-primary/40 text-gold-primary rounded-xl font-bold text-xs flex items-center justify-center gap-2 transition active:scale-95"
                 >
                   <MessageSquare className="w-4 h-4" />
                   <span>Mensaje</span>
                 </button>
 
                 <button
-                  onClick={() => setPassengerState('TRIP_COMPLETED')}
-                  className="py-3 bg-gold-primary hover:bg-gold-light text-background rounded-xl font-bold text-xs flex items-center justify-center gap-1 shadow-lg shadow-gold-primary/20 transition"
+                  onClick={handleCancelActiveRide}
+                  className="py-3 bg-rose-500/15 hover:bg-rose-500/25 border border-rose-500/30 text-rose-400 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 transition active:scale-95"
                 >
-                  <span>Simular Llegada</span>
+                  <X className="w-4 h-4" />
+                  <span>Cancelar / Salir</span>
                 </button>
               </div>
             </motion.div>

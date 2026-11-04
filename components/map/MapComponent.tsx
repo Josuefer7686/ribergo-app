@@ -215,8 +215,6 @@ export default function MapComponent() {
     mapRecenterTrigger
   } = useAppStore();
 
-  const [animatedMotoPos, setAnimatedMotoPos] = useState<[number, number] | null>(null);
-
   // Check if destination is "Acordar en persona"
   const isInPersonDestination = !destination || (destination as any).id === 'in-person' || destination.name?.toLowerCase().includes('acordar');
 
@@ -230,6 +228,9 @@ export default function MapComponent() {
 
   // Only real online drivers (100% real, no bots/mocks)
   const activeDriversList: DriverData[] = onlineDrivers;
+
+  // Real assigned driver live location lookup from onlineDrivers
+  const liveAssignedDriver = activeDriversList.find((d) => d.id === assignedDriver?.id) || assignedDriver;
 
   // Selected driver coordinate for smooth auto-centering
   const selectedDriver = activeDriversList.find((d) => d.id === selectedDriverId) || null;
@@ -250,43 +251,6 @@ export default function MapComponent() {
   // Active trip state check
   const isTripActive = (role === 'PASSENGER' && (passengerState === 'CONFIRMING' || passengerState === 'SEARCHING_DRIVER' || passengerState === 'DRIVER_FOUND' || passengerState === 'TRIP_STARTED')) ||
                        (role === 'DRIVER' && (driverState === 'RIDE_REQUEST' || driverState === 'GOING_TO_PASSENGER' || driverState === 'TRIP_STARTED'));
-
-  // Animated mototaxi logic for assigned driver ride
-  useEffect(() => {
-    let interval: NodeJS.Timeout | null = null;
-
-    if (role === 'PASSENGER' && passengerState === 'DRIVER_FOUND' && currentLocation) {
-      // Driver approaches passenger's current location
-      const startLat = assignedDriver?.currentLocation?.lat || (currentLocation.lat + 0.003);
-      const startLng = assignedDriver?.currentLocation?.lng || (currentLocation.lng + 0.003);
-
-      let progress = 0;
-      interval = setInterval(() => {
-        progress += 0.05;
-        if (progress > 1) progress = 1;
-        const currentLat = startLat + (currentLocation.lat - startLat) * progress;
-        const currentLng = startLng + (currentLocation.lng - startLng) * progress;
-        setAnimatedMotoPos([currentLat, currentLng]);
-      }, 600);
-    } else if (isTripActive && !isInPersonDestination && currentLocation && destination && (passengerState === 'TRIP_STARTED' || driverState === 'TRIP_STARTED')) {
-      // Riding towards fixed destination
-      let progress = 0;
-      interval = setInterval(() => {
-        progress += 0.05;
-        if (progress > 1) progress = 0;
-        const currentLat = currentLocation.lat + (destination.lat - currentLocation.lat) * progress;
-        const currentLng = currentLocation.lng + (destination.lng - currentLocation.lng) * progress;
-        setAnimatedMotoPos([currentLat, currentLng]);
-      }, 1000);
-    } else {
-      const timer = setTimeout(() => setAnimatedMotoPos(null), 0);
-      return () => clearTimeout(timer);
-    }
-
-    return () => {
-      if (interval) clearInterval(interval);
-    };
-  }, [isTripActive, passengerState, driverState, currentLocation, destination, assignedDriver, isInPersonDestination, role]);
 
   return (
     <div className="w-full h-full absolute inset-0 z-0 overflow-hidden">
@@ -336,13 +300,17 @@ export default function MapComponent() {
           />
         )}
 
-        {/* Animated Active Mototaxi for assigned trip */}
-        {animatedMotoPos && (
-          <Marker position={animatedMotoPos} icon={getMotoIcon(true, 45, true)} />
+        {/* Real Assigned Driver Live Location during Active Trip (100% Real-time GPS movement) */}
+        {role === 'PASSENGER' && (passengerState === 'DRIVER_FOUND' || passengerState === 'NEGOTIATING' || passengerState === 'TRIP_STARTED') && liveAssignedDriver?.currentLocation && (
+          <Marker 
+            key={liveAssignedDriver.id || 'assigned_driver'} 
+            position={[liveAssignedDriver.currentLocation.lat, liveAssignedDriver.currentLocation.lng]} 
+            icon={getMotoIcon(true, liveAssignedDriver.heading || 0, (liveAssignedDriver.speed || 0) > 0)} 
+          />
         )}
         
         {/* Real Online Mototaxis on Map with Real-time Heading & Tap Interaction */}
-        {!animatedMotoPos && role === 'PASSENGER' && (
+        {role === 'PASSENGER' && (
           passengerState === 'IDLE' || 
           passengerState === 'LOCATION_READY' || 
           passengerState === 'CONFIRMING' || 
