@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useAppStore } from '@/store/useAppStore';
 import { apiService } from '@/services/apiService';
 import { haptics } from '@/utils/haptics';
@@ -44,6 +44,17 @@ export const PassengerHome = () => {
   const [customOffer, setCustomOffer] = useState<number | null>(null);
   const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<'CASH' | 'QR'>('CASH');
   const [qrPaymentSent, setQrPaymentSent] = useState(false);
+
+  // References to prevent infinite state re-render loops
+  const activeTripRef = useRef(activeTrip);
+  const assignedDriverRef = useRef(assignedDriver);
+  const passengerStateRef = useRef(passengerState);
+
+  useEffect(() => {
+    activeTripRef.current = activeTrip;
+    assignedDriverRef.current = assignedDriver;
+    passengerStateRef.current = passengerState;
+  }, [activeTrip, assignedDriver, passengerState]);
 
   // Default fare calculation based on service type
   const baseFare = urbanServiceType === 'REMOLCADA' ? 15 : 10;
@@ -110,10 +121,12 @@ export const PassengerHome = () => {
     setPassengerState('CONFIRMING');
   };
 
-  // Listen to real-time updates for active trip
+  // Listen to real-time updates for active trip (No infinite loop)
   useEffect(() => {
-    if (!activeTrip?.id) return;
-    const unsubscribe = apiService.subscribeToRide(activeTrip.id, (rideData) => {
+    const tripId = activeTrip?.id;
+    if (!tripId) return;
+
+    const unsubscribe = apiService.subscribeToRide(tripId, (rideData) => {
       if (!rideData) return;
 
       if (rideData.status === 'NEGOTIATING') {
@@ -128,15 +141,19 @@ export const PassengerHome = () => {
           plate: rideData.plate || 'RBT-100',
           currentLocation: rideData.pickup || currentLocation || { lat: -11.0061, lng: -66.0747 },
         };
-        setAssignedDriver(driverInfo);
+        if (assignedDriverRef.current?.id !== driverInfo.id) {
+          setAssignedDriver(driverInfo);
+        }
+        if (passengerStateRef.current !== 'NEGOTIATING') {
+          haptics.heavy();
+          audio.passengerDriverFound();
+          setPassengerState('NEGOTIATING');
+        }
         setActiveTrip({
-          ...(activeTrip || {}),
+          ...(activeTripRef.current || {}),
           ...rideData,
           driver: driverInfo,
         });
-        haptics.heavy();
-        audio.passengerDriverFound();
-        setPassengerState('NEGOTIATING');
       } else if (rideData.driverId && rideData.status === 'GOING_TO_PASSENGER') {
         const driverInfo = {
           id: rideData.driverId,
@@ -149,29 +166,39 @@ export const PassengerHome = () => {
           plate: rideData.plate || 'RBT-100',
           currentLocation: rideData.pickup || currentLocation || { lat: -11.0061, lng: -66.0747 },
         };
-        setAssignedDriver(driverInfo);
+        if (assignedDriverRef.current?.id !== driverInfo.id) {
+          setAssignedDriver(driverInfo);
+        }
+        if (passengerStateRef.current !== 'DRIVER_FOUND') {
+          haptics.success();
+          audio.passengerDriverFound();
+          setPassengerState('DRIVER_FOUND');
+        }
         setActiveTrip({
-          ...(activeTrip || {}),
+          ...(activeTripRef.current || {}),
           ...rideData,
           driver: driverInfo,
         });
-        haptics.success();
-        audio.passengerDriverFound();
-        setPassengerState('DRIVER_FOUND');
       } else if (rideData.status === 'SEARCHING_DRIVER') {
-        setPassengerState('SEARCHING_DRIVER');
+        if (passengerStateRef.current !== 'SEARCHING_DRIVER') {
+          setPassengerState('SEARCHING_DRIVER');
+        }
       } else if (rideData.status === 'TRIP_STARTED') {
+        if (passengerStateRef.current !== 'TRIP_STARTED') {
+          setPassengerState('TRIP_STARTED');
+        }
         setActiveTrip({
-          ...(activeTrip || {}),
+          ...(activeTripRef.current || {}),
           ...rideData,
         });
-        setPassengerState('TRIP_STARTED');
       } else if (rideData.status === 'COMPLETED') {
+        if (passengerStateRef.current !== 'TRIP_COMPLETED') {
+          setPassengerState('TRIP_COMPLETED');
+        }
         setActiveTrip({
-          ...(activeTrip || {}),
+          ...(activeTripRef.current || {}),
           ...rideData,
         });
-        setPassengerState('TRIP_COMPLETED');
       } else if (rideData.status === 'CANCELLED') {
         haptics.notification();
         resetRide();
@@ -179,7 +206,7 @@ export const PassengerHome = () => {
     });
 
     return () => unsubscribe();
-  }, [activeTrip?.id, setActiveTrip, setAssignedDriver, setPassengerState, currentLocation, selectedPaymentMethod, resetRide, activeTrip]);
+  }, [activeTrip?.id, setActiveTrip, setAssignedDriver, setPassengerState, resetRide, currentLocation]);
 
   // Confirm Mototaxi
   const handleConfirmBooking = async () => {

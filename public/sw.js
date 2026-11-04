@@ -1,4 +1,4 @@
-const CACHE_NAME = 'ribergo-v2.5';
+const CACHE_NAME = 'ribergo-v2.6';
 const ASSETS_TO_CACHE = [
   '/',
   '/manifest.json',
@@ -45,7 +45,28 @@ self.addEventListener('activate', (event) => {
 });
 
 self.addEventListener('fetch', (event) => {
+  // Cache API ONLY supports GET requests. Immediately ignore POST, PUT, DELETE, etc.
+  if (event.request.method !== 'GET') {
+    return;
+  }
+
+  // Only handle http/https URLs
+  if (!event.request.url.startsWith('http')) {
+    return;
+  }
+
   const url = new URL(event.request.url);
+
+  // Do not intercept or cache external auth/database/recaptcha APIs
+  if (
+    url.hostname.includes('firebase') ||
+    url.hostname.includes('googleapis') ||
+    url.hostname.includes('google.com') ||
+    url.hostname.includes('gstatic.com') ||
+    url.hostname.includes('identitytoolkit')
+  ) {
+    return;
+  }
 
   // If requesting manifest or icons/logo, always attempt network first so new branding updates immediately
   if (
