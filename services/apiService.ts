@@ -1,5 +1,5 @@
 import { 
-  ActiveTripInfo, LocationPoint, UserProfile, UserRole, 
+  ActiveTripInfo, LocationPoint, UserProfile, UserRole, ServiceType,
   TerminalDeparture, TerminalBooking, TerminalExpreso, TerminalEncomienda 
 } from '@/store/useAppStore';
 import { DriverData } from './mockData';
@@ -808,7 +808,8 @@ export const apiService = {
     passengerId: string, 
     passengerName: string,
     paymentMethod: 'CASH' | 'QR' = 'CASH',
-    passengerPhone?: string
+    passengerPhone?: string,
+    serviceType: ServiceType = 'MOTOTAXI'
   ): Promise<ActiveTripInfo> {
     const rideId = 'ride-' + Date.now();
     const nowMs = Date.now();
@@ -826,6 +827,7 @@ export const apiService = {
       paymentMethod,
       paymentStatus: 'PENDING',
       status: 'SEARCHING_DRIVER',
+      serviceType,
     };
 
     // 1. Guardar y emitir inmediatamente en RealtimeSyncBus (0ms de latencia)

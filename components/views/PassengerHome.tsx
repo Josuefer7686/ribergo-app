@@ -84,7 +84,8 @@ export const PassengerHome = () => {
         passengerId,
         passengerName,
         'CASH',
-        user?.phone || '+591 70000000'
+        user?.phone || '+591 70000000',
+        urbanServiceType
       );
       setActiveTrip(trip);
     } catch (err) {
@@ -199,7 +200,8 @@ export const PassengerHome = () => {
         passengerId, 
         passengerName,
         selectedPaymentMethod,
-        user?.phone || '+591 70000000'
+        user?.phone || '+591 70000000',
+        urbanServiceType
       );
       setActiveTrip(trip);
     } catch (err) {
@@ -592,9 +594,21 @@ export const PassengerHome = () => {
               </div>
 
               {/* Driver En Route Status Notice */}
-              <div className="flex items-center gap-2 p-2.5 rounded-xl bg-gold-primary/10 border border-gold-primary/20 text-xs text-gold-primary">
-                <Bike className="w-4 h-4 shrink-0 animate-bounce text-gold-primary" />
-                <span className="font-medium text-[11px] leading-tight">El conductor va en camino a recogerte. El conductor iniciará el viaje.</span>
+              <div className={`flex items-center gap-2 p-2.5 rounded-xl border text-xs ${
+                activeTrip?.serviceType === 'REMOLCADA'
+                  ? 'bg-amber-500/15 border-amber-500/30 text-amber-300'
+                  : 'bg-gold-primary/10 border-gold-primary/20 text-gold-primary'
+              }`}>
+                {activeTrip?.serviceType === 'REMOLCADA' ? (
+                  <Wrench className="w-4 h-4 shrink-0 animate-bounce text-amber-400" />
+                ) : (
+                  <Bike className="w-4 h-4 shrink-0 animate-bounce text-gold-primary" />
+                )}
+                <span className="font-medium text-[11px] leading-tight">
+                  {activeTrip?.serviceType === 'REMOLCADA'
+                    ? 'El mototaxista va en camino para auxiliarte y remolcar tu moto. El conductor iniciará el auxilio.'
+                    : 'El conductor va en camino a recogerte. El conductor iniciará el viaje.'}
+                </span>
               </div>
 
               {/* Action Buttons: Chat & Cancel (Passenger can only chat or cancel; driver starts the ride) */}
@@ -628,22 +642,34 @@ export const PassengerHome = () => {
               className="p-5 rounded-3xl bg-surface/95 border border-border-custom backdrop-blur-xl shadow-2xl space-y-4"
             >
               <div className="flex items-center justify-between border-b border-border-custom pb-3">
-                <span className="text-xs font-bold text-gold-primary flex items-center gap-1.5">
-                  <Bike className="w-4 h-4 text-gold-primary animate-pulse" />
-                  Viaje en curso
+                <span className={`text-xs font-bold flex items-center gap-1.5 ${
+                  activeTrip?.serviceType === 'REMOLCADA' ? 'text-amber-400' : 'text-gold-primary'
+                }`}>
+                  {activeTrip?.serviceType === 'REMOLCADA' ? (
+                    <Wrench className="w-4 h-4 text-amber-400 animate-pulse" />
+                  ) : (
+                    <Bike className="w-4 h-4 text-gold-primary animate-pulse" />
+                  )}
+                  {activeTrip?.serviceType === 'REMOLCADA' ? 'Auxilio / Remolcada en curso' : 'Viaje en curso'}
                 </span>
-                <span className="text-xs text-text-secondary font-semibold">En camino al destino</span>
+                <span className="text-xs text-text-secondary font-semibold">
+                  {activeTrip?.serviceType === 'REMOLCADA' ? 'Hacia destino o taller' : 'En camino al destino'}
+                </span>
               </div>
 
               <div className="p-3 rounded-2xl bg-surface-2 border border-border-custom text-xs space-y-1.5">
                 <p className="text-text-secondary">Destino: <span className="text-white font-bold">{destination?.name}</span></p>
-                <p className="text-text-secondary">Tarifa acordada: <span className="text-gold-primary font-bold">{activeTrip?.price || 8} BOB</span></p>
+                <p className="text-text-secondary">Tarifa acordada: <span className="text-gold-primary font-bold">{activeTrip?.price || (activeTrip?.serviceType === 'REMOLCADA' ? 15 : 10)} BOB</span></p>
               </div>
 
               {/* Trip In Progress Notice */}
               <div className="flex items-center gap-2 p-2.5 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-xs text-emerald-400">
                 <Check className="w-4 h-4 shrink-0 text-emerald-400" />
-                <span className="font-medium text-[11px] leading-tight">En viaje con el conductor. Al llegar, el conductor finalizará el viaje.</span>
+                <span className="font-medium text-[11px] leading-tight">
+                  {activeTrip?.serviceType === 'REMOLCADA'
+                    ? 'Remolcada en proceso hacia tu destino. Al llegar, el conductor finalizará el servicio.'
+                    : 'En viaje con el conductor. Al llegar, el conductor finalizará el viaje.'}
+                </span>
               </div>
 
               {/* Action Buttons: Chat & Cancel/Exit */}

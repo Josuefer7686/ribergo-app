@@ -6,9 +6,10 @@ import L from 'leaflet';
 import { useAppStore } from '@/store/useAppStore';
 import { DriverData } from '@/services/mockData';
 import { apiService } from '@/services/apiService';
-import { Bike } from 'lucide-react';
+import { Bike, Wrench } from 'lucide-react';
 import { haptics } from '@/utils/haptics';
 import { audio } from '@/utils/audio';
+import { fetchLiveRoute } from '@/utils/routing';
 
 // Fix Leaflet default icon paths
 if (typeof window !== 'undefined') {
@@ -31,6 +32,26 @@ function getUserIcon() {
     className: 'custom-user-marker',
     iconSize: [26, 26],
     iconAnchor: [13, 13]
+  });
+}
+
+function getPassengerPickupIcon(isRescue = false) {
+  const color = isRescue ? '#F97316' : '#38BDF8';
+  return new L.DivIcon({
+    html: `
+      <div style="position: relative; width: 34px; height: 34px; display: flex; align-items: center; justify-content: center;">
+        <div style="position: absolute; inset: -6px; background: ${isRescue ? 'rgba(249,115,22,0.35)' : 'rgba(56,189,248,0.35)'}; border-radius: 50%; animation: ping 1.8s cubic-bezier(0,0,0.2,1) infinite;"></div>
+        <div style="width: 28px; height: 28px; background: #05080B; border: 2.5px solid ${color}; border-radius: 50%; display: flex; align-items: center; justify-content: center; box-shadow: 0 0 16px ${isRescue ? 'rgba(249,115,22,0.85)' : 'rgba(56,189,248,0.85)'};">
+          ${isRescue 
+            ? `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="${color}" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>`
+            : `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="${color}" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>`
+          }
+        </div>
+      </div>
+    `,
+    className: 'custom-pickup-marker',
+    iconSize: [34, 34],
+    iconAnchor: [17, 17]
   });
 }
 
@@ -106,17 +127,19 @@ function MapUpdater({
   destination,
   selectedDriverLocation,
   recenterTrigger = 0,
+  routeBounds = null,
 }: { 
   centerLat: number;
   centerLng: number;
   destination?: [number, number] | null;
   selectedDriverLocation?: [number, number] | null;
   recenterTrigger?: number;
+  routeBounds?: [[number, number], [number, number]] | null;
 }) {
   const map = useMap();
   const prevCenterRef = useRef<string>('');
   const prevDestRef = useRef<string>('');
-  const prevRecenterRef = useRef<number>(recenterTrigger);
+  const prevRouteKeyRef = useRef<string>('');
   const hasInitializedRef = useRef<boolean>(false);
   const isDefaultPlaza = Math.abs(centerLat - (-11.0061)) < 0.0001 && Math.abs(centerLng - (-66.0747)) < 0.0001;
   const prevIsDefaultRef = useRef<boolean>(isDefaultPlaza);
@@ -146,6 +169,18 @@ function MapUpdater({
       map.setView([centerLat, centerLng], 15, { animate: false });
     }
   }, [centerLat, centerLng, destination, map]);
+
+  // Fit bounds when driver is on the way to passenger or during active route
+  useEffect(() => {
+    if (routeBounds) {
+      const key = `${routeBounds[0][0].toFixed(3)},${routeBounds[0][1].toFixed(3)}_${routeBounds[1][0].toFixed(3)},${routeBounds[1][1].toFixed(3)}`;
+      if (prevRouteKeyRef.current !== key) {
+        prevRouteKeyRef.current = key;
+        const bounds = L.latLngBounds(routeBounds);
+        map.fitBounds(bounds, { padding: [70, 70], maxZoom: 16 });
+      }
+    }
+  }, [routeBounds, map]);
 
   // If initial load was default plaza, fly to user location when real GPS is first received
   useEffect(() => {
@@ -194,7 +229,7 @@ function MapUpdater({
         map.setView([targetLat, targetLng], 16, { animate: true });
       }
     }
-  }, [recenterTrigger, map]);
+  }, [recenterTrigger, map, centerLat, centerLng]);
 
   // Smoothly pan towards selected driver if tapped
   useEffect(() => {
@@ -202,7 +237,7 @@ function MapUpdater({
       map.stop();
       map.panTo(selectedDriverLocation, { animate: true, duration: 0.45 });
     }
-  }, [selectedDriverLocation?.[0], selectedDriverLocation?.[1], map]);
+  }, [selectedDriverLocation, map]);
 
   return null;
 }
@@ -212,11 +247,15 @@ export default function MapComponent() {
     currentLocation, destination, role, passengerState, driverState, 
     assignedDriver, onlineDrivers, setOnlineDrivers,
     selectedDriverId, setSelectedDriverId,
-    mapRecenterTrigger
+    mapRecenterTrigger, activeTrip, urbanServiceType
   } = useAppStore();
 
   // Check if destination is "Acordar en persona"
   const isInPersonDestination = !destination || (destination as any).id === 'in-person' || destination.name?.toLowerCase().includes('acordar');
+
+  // Service type: MOTOTAXI or REMOLCADA / AUXILIO
+  const serviceType = activeTrip?.serviceType || urbanServiceType || 'MOTOTAXI';
+  const isRescue = serviceType === 'REMOLCADA';
 
   // Subscribe to real-time online drivers from Hybrid SyncBus & Firestore
   useEffect(() => {
@@ -243,14 +282,97 @@ export default function MapComponent() {
   const centerLng = currentLocation ? currentLocation.lng : -66.0747;
   const center = useMemo<[number, number]>(() => [centerLat, centerLng], [centerLat, centerLng]); 
 
-  // Only define destination coordinates if NOT "Acordar en persona"
+  // Destination coordinates if NOT in-person
   const destPoint: [number, number] | null = (destination && !isInPersonDestination)
     ? [destination.lat, destination.lng]
     : null;
 
-  // Active trip state check
-  const isTripActive = (role === 'PASSENGER' && (passengerState === 'CONFIRMING' || passengerState === 'SEARCHING_DRIVER' || passengerState === 'DRIVER_FOUND' || passengerState === 'TRIP_STARTED')) ||
-                       (role === 'DRIVER' && (driverState === 'RIDE_REQUEST' || driverState === 'GOING_TO_PASSENGER' || driverState === 'TRIP_STARTED'));
+  // Determine active dynamic route endpoints
+  let routeOrigin: [number, number] | null = null;
+  let routeTarget: [number, number] | null = null;
+
+  if (role === 'PASSENGER') {
+    if (passengerState === 'DRIVER_FOUND' || passengerState === 'NEGOTIATING') {
+      // Driver is on the way to meet passenger!
+      if (liveAssignedDriver?.currentLocation && (currentLocation || activeTrip?.pickup)) {
+        routeOrigin = [liveAssignedDriver.currentLocation.lat, liveAssignedDriver.currentLocation.lng];
+        routeTarget = currentLocation 
+          ? [currentLocation.lat, currentLocation.lng] 
+          : [activeTrip!.pickup.lat, activeTrip!.pickup.lng];
+      }
+    } else if (passengerState === 'TRIP_STARTED') {
+      // Trip started, moving towards destination
+      if (destPoint && !isInPersonDestination) {
+        if (liveAssignedDriver?.currentLocation) {
+          routeOrigin = [liveAssignedDriver.currentLocation.lat, liveAssignedDriver.currentLocation.lng];
+        } else if (currentLocation) {
+          routeOrigin = [currentLocation.lat, currentLocation.lng];
+        }
+        routeTarget = destPoint;
+      }
+    } else if (passengerState === 'CONFIRMING' && currentLocation && destPoint && !isInPersonDestination) {
+      // Pre-booking route preview
+      routeOrigin = [currentLocation.lat, currentLocation.lng];
+      routeTarget = destPoint;
+    }
+  } else if (role === 'DRIVER') {
+    if ((driverState === 'GOING_TO_PASSENGER' || activeTrip?.status === 'GOING_TO_PASSENGER' || activeTrip?.status === 'NEGOTIATING') && activeTrip?.pickup && currentLocation) {
+      // Driver is navigating to passenger's pickup location!
+      routeOrigin = [currentLocation.lat, currentLocation.lng];
+      routeTarget = [activeTrip.pickup.lat, activeTrip.pickup.lng];
+    } else if (driverState === 'TRIP_STARTED' && activeTrip && currentLocation) {
+      // Driver is moving passenger to destination
+      const tripDest = activeTrip.destination;
+      const isTripDestInPerson = !tripDest || (tripDest as any).id === 'in-person' || tripDest.name?.toLowerCase().includes('acordar');
+      if (tripDest && !isTripDestInPerson) {
+        routeOrigin = [currentLocation.lat, currentLocation.lng];
+        routeTarget = [tripDest.lat, tripDest.lng];
+      }
+    }
+  }
+
+  // Live street turn-by-turn route state
+  const [liveRoutePoints, setLiveRoutePoints] = useState<[number, number][]>([]);
+
+  // Coordinate key rounded to 4 decimals (~11m) to trigger recalculation on movement & deviation
+  const originKey = routeOrigin ? `${routeOrigin[0].toFixed(4)},${routeOrigin[1].toFixed(4)}` : '';
+  const targetKey = routeTarget ? `${routeTarget[0].toFixed(4)},${routeTarget[1].toFixed(4)}` : '';
+
+  useEffect(() => {
+    let isMounted = true;
+
+    if (!routeOrigin || !routeTarget) {
+      Promise.resolve().then(() => {
+        if (isMounted) setLiveRoutePoints([]);
+      });
+      return () => {
+        isMounted = false;
+      };
+    }
+
+    const startPoint = routeOrigin;
+    const endPoint = routeTarget;
+
+    fetchLiveRoute(startPoint[0], startPoint[1], endPoint[0], endPoint[1])
+      .then((points) => {
+        if (isMounted) {
+          setLiveRoutePoints(points);
+        }
+      })
+      .catch(() => {
+        if (isMounted) {
+          setLiveRoutePoints([startPoint, endPoint]);
+        }
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [originKey, targetKey, routeOrigin, routeTarget]);
+
+  // Route bounds for auto-framing on initial encounter
+  const routeBounds: [[number, number], [number, number]] | null = 
+    (routeOrigin && routeTarget) ? [routeOrigin, routeTarget] : null;
 
   return (
     <div className="w-full h-full absolute inset-0 z-0 overflow-hidden">
@@ -268,39 +390,78 @@ export default function MapComponent() {
         <MapUpdater 
           centerLat={centerLat} 
           centerLng={centerLng} 
-          destination={isTripActive && !isInPersonDestination ? destPoint : null} 
+          destination={routeTarget && !isInPersonDestination ? routeTarget : destPoint} 
           selectedDriverLocation={selectedDriverLocation}
           recenterTrigger={mapRecenterTrigger}
+          routeBounds={routeBounds}
         />
         <MapClickHandler onMapClick={() => setSelectedDriverId(null)} />
         
-        {/* User / Pickup Location */}
+        {/* User / Driver Live Location */}
         {currentLocation && (
-          <Marker position={[currentLocation.lat, currentLocation.lng]} icon={getUserIcon()} />
+          <Marker 
+            position={[currentLocation.lat, currentLocation.lng]} 
+            icon={role === 'DRIVER' ? getMotoIcon(true, currentLocation.heading || 0, true) : getUserIcon()} 
+          />
+        )}
+
+        {/* Passenger Pickup Location Marker for Driver when en route */}
+        {role === 'DRIVER' && (driverState === 'GOING_TO_PASSENGER' || activeTrip?.status === 'GOING_TO_PASSENGER' || activeTrip?.status === 'NEGOTIATING') && activeTrip?.pickup && (
+          <Marker 
+            position={[activeTrip.pickup.lat, activeTrip.pickup.lng]} 
+            icon={getPassengerPickupIcon(isRescue)} 
+          />
         )}
         
-        {/* Destination Location - ONLY if NOT in-person */}
+        {/* Destination Location - ONLY if specified and NOT in-person */}
         {destPoint && !isInPersonDestination && (
           <Marker position={destPoint} icon={getDestIcon()} />
         )}
 
-        {/* Route Polyline - ONLY if NOT in-person */}
-        {isTripActive && currentLocation && destPoint && !isInPersonDestination && (
-          <Polyline 
-            positions={[
-              [currentLocation.lat, currentLocation.lng],
-              destPoint
-            ]}
-            color="#F4C542"
-            weight={5}
-            opacity={0.9}
-            lineCap="round"
-            lineJoin="round"
-            dashArray="8, 8"
-          />
+        {/* 🌟 LUXURY ANIMATED STREET ROUTE (TURN-BY-TURN & DEVIATION AWARE) */}
+        {liveRoutePoints.length >= 2 && (
+          <>
+            {/* Layer 1: Ambient Glow / Aura Pulse */}
+            <Polyline 
+              positions={liveRoutePoints}
+              pathOptions={{
+                color: isRescue ? '#F97316' : '#F4C542',
+                weight: 11,
+                opacity: 0.38,
+                lineCap: 'round',
+                lineJoin: 'round',
+                className: isRescue ? 'ribergo-route-glow-rescue' : 'ribergo-route-glow-gold'
+              }}
+            />
+
+            {/* Layer 2: Solid High-Contrast Street Route Line */}
+            <Polyline 
+              positions={liveRoutePoints}
+              pathOptions={{
+                color: isRescue ? '#EA580C' : '#F4C542',
+                weight: 5.5,
+                opacity: 0.88,
+                lineCap: 'round',
+                lineJoin: 'round'
+              }}
+            />
+
+            {/* Layer 3: Laser Dash Pulses Flowing in Direction of Travel */}
+            <Polyline 
+              positions={liveRoutePoints}
+              pathOptions={{
+                color: isRescue ? '#FFF7ED' : '#FFFFFF',
+                weight: 3.2,
+                opacity: 0.95,
+                lineCap: 'round',
+                lineJoin: 'round',
+                className: isRescue ? 'ribergo-route-flow-rescue' : 'ribergo-route-flow-gold'
+              }}
+            />
+          </>
         )}
 
-        {/* Real Assigned Driver Live Location during Active Trip (100% Real-time GPS movement) */}
+        {/* Real Assigned Driver Live Location during Active Trip (Passenger View) */}
         {role === 'PASSENGER' && (passengerState === 'DRIVER_FOUND' || passengerState === 'NEGOTIATING' || passengerState === 'TRIP_STARTED') && liveAssignedDriver?.currentLocation && (
           <Marker 
             key={liveAssignedDriver.id || 'assigned_driver'} 

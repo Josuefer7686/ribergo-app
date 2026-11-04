@@ -30,6 +30,8 @@ export type LocationPoint = {
   lng: number;
   name?: string;
   address?: string;
+  heading?: number;
+  speed?: number;
 };
 
 export type UserProfile = {

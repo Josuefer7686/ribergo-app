@@ -4,7 +4,7 @@ import { useState, useEffect, useRef } from 'react';
 import { useAppStore, LocationPoint } from '@/store/useAppStore';
 import { MapView } from '@/components/map/MapView';
 import { 
-  Power, Navigation, MapPin, MessageSquare, Check, X, Clock, DollarSign, User, Bike, ChevronRight, AlertCircle, QrCode, Sparkles 
+  Power, Navigation, MapPin, MessageSquare, Check, X, Clock, DollarSign, User, Bike, ChevronRight, AlertCircle, QrCode, Sparkles, Wrench, AlertTriangle 
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { haptics } from '@/utils/haptics';
@@ -680,24 +680,40 @@ export const DriverHome = () => {
                 </span>
                 <div className="text-right">
                   <span className="text-xl font-black text-gold-primary">{pendingRequest.price} BOB</span>
-                  {pendingRequest.price > 10 && (
+                  {pendingRequest.serviceType === 'REMOLCADA' ? (
+                    <span className="block text-[9px] font-black text-amber-400 uppercase tracking-wider flex items-center justify-end gap-1">
+                      <Wrench className="w-3 h-3 text-amber-400" />
+                      Auxilio / Remolcada
+                    </span>
+                  ) : pendingRequest.price > 10 ? (
                     <span className="block text-[9px] font-black text-amber-400 uppercase tracking-wider">
                       ⚡ ¡Oferta atractiva!
                     </span>
-                  )}
+                  ) : null}
                 </div>
               </div>
 
               {/* Passenger & Trip Info */}
               <div className="p-3.5 rounded-2xl bg-surface-2 border border-border-custom space-y-3">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-xl bg-gold-primary/20 border border-gold-primary/40 flex items-center justify-center text-gold-primary">
-                    <User className="w-5 h-5" />
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${
+                      pendingRequest.serviceType === 'REMOLCADA'
+                        ? 'bg-amber-500/20 border border-amber-500/40 text-amber-400'
+                        : 'bg-gold-primary/20 border border-gold-primary/40 text-gold-primary'
+                    }`}>
+                      {pendingRequest.serviceType === 'REMOLCADA' ? <Wrench className="w-5 h-5 animate-pulse" /> : <User className="w-5 h-5" />}
+                    </div>
+                    <div>
+                      <h4 className="text-sm font-bold text-white">{pendingRequest.passengerName}</h4>
+                      <p className="text-xs text-text-secondary">★ {pendingRequest.passengerRating || 5.0} pasajero</p>
+                    </div>
                   </div>
-                  <div>
-                    <h4 className="text-sm font-bold text-white">{pendingRequest.passengerName}</h4>
-                    <p className="text-xs text-text-secondary">★ {pendingRequest.passengerRating} pasajero</p>
-                  </div>
+                  {pendingRequest.serviceType === 'REMOLCADA' && (
+                    <span className="px-2 py-0.5 rounded-md bg-amber-500/20 border border-amber-500/40 text-[10px] font-black text-amber-400 uppercase tracking-wider">
+                      Auxilio
+                    </span>
+                  )}
                 </div>
 
                 <div className="space-y-1.5 text-xs border-t border-border-custom pt-2">
@@ -735,13 +751,32 @@ export const DriverHome = () => {
               className="p-5 rounded-3xl bg-surface/95 border border-border-custom backdrop-blur-xl shadow-2xl space-y-4"
             >
               <div className="flex items-center justify-between border-b border-border-custom pb-2">
-                <span className="text-xs font-bold text-gold-primary">En camino al pasajero</span>
-                <span className="text-xs text-text-secondary">~3 min</span>
+                <span className="text-xs font-bold text-gold-primary flex items-center gap-1.5">
+                  {activeTrip.serviceType === 'REMOLCADA' ? (
+                    <>
+                      <Wrench className="w-4 h-4 text-amber-400 animate-bounce" />
+                      <span>En camino al auxilio / remolcada</span>
+                    </>
+                  ) : (
+                    <>
+                      <Bike className="w-4 h-4 text-gold-primary animate-pulse" />
+                      <span>En camino al pasajero</span>
+                    </>
+                  )}
+                </span>
+                <span className="text-xs text-emerald-400 font-semibold flex items-center gap-1">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                  Ruta trazada
+                </span>
               </div>
 
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-gold-primary/10 border border-gold-primary/30 flex items-center justify-center text-gold-primary">
-                  <User className="w-5 h-5" />
+                <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${
+                  activeTrip.serviceType === 'REMOLCADA'
+                    ? 'bg-amber-500/20 border border-amber-500/40 text-amber-400'
+                    : 'bg-gold-primary/10 border border-gold-primary/30 text-gold-primary'
+                }`}>
+                  {activeTrip.serviceType === 'REMOLCADA' ? <Wrench className="w-5 h-5" /> : <User className="w-5 h-5" />}
                 </div>
                 <div>
                   <h4 className="text-sm font-bold text-white">{activeTrip.passengerName}</h4>
@@ -760,9 +795,9 @@ export const DriverHome = () => {
 
                 <button
                   onClick={handleStartPassengerTrip}
-                  className="py-3 bg-gold-primary hover:bg-gold-light text-background rounded-xl font-bold text-xs flex items-center justify-center gap-1 shadow-lg shadow-gold-primary/20 transition"
+                  className="py-3 bg-gold-primary hover:bg-gold-light text-background rounded-xl font-bold text-xs flex items-center justify-center gap-1 shadow-lg shadow-gold-primary/20 transition active:scale-95"
                 >
-                  <span>Iniciar Viaje</span>
+                  <span>{activeTrip.serviceType === 'REMOLCADA' ? 'Iniciar Auxilio' : 'Iniciar Viaje'}</span>
                   <ChevronRight className="w-4 h-4" />
                 </button>
               </div>
@@ -780,8 +815,17 @@ export const DriverHome = () => {
             >
               <div className="flex items-center justify-between border-b border-border-custom pb-2">
                 <span className="text-xs font-bold text-gold-primary flex items-center gap-1.5">
-                  <Bike className="w-4 h-4 text-gold-primary animate-pulse" />
-                  Viaje en curso
+                  {activeTrip.serviceType === 'REMOLCADA' ? (
+                    <>
+                      <Wrench className="w-4 h-4 text-amber-400 animate-pulse" />
+                      <span>Remolcada / Auxilio en curso</span>
+                    </>
+                  ) : (
+                    <>
+                      <Bike className="w-4 h-4 text-gold-primary animate-pulse" />
+                      <span>Viaje en curso</span>
+                    </>
+                  )}
                 </span>
                 <span className="text-sm font-black text-gold-primary">{activeTrip.price} BOB</span>
               </div>
@@ -837,7 +881,7 @@ export const DriverHome = () => {
               <div className="grid grid-cols-2 gap-3">
                 <button
                   onClick={() => setActiveTab('MESSAGES')}
-                  className="py-3 bg-surface-2 hover:bg-surface border border-gold-primary/40 text-gold-primary rounded-xl font-bold text-xs flex items-center justify-center gap-2 transition"
+                  className="py-3 bg-surface-2 hover:bg-surface border border-gold-primary/40 text-gold-primary rounded-xl font-bold text-xs flex items-center justify-center gap-2 transition active:scale-95"
                 >
                   <MessageSquare className="w-4 h-4" />
                   <span>Mensaje</span>
@@ -845,9 +889,9 @@ export const DriverHome = () => {
 
                 <button
                   onClick={handleFinishDriverTrip}
-                  className="py-3 bg-gold-primary hover:bg-gold-light text-background rounded-xl font-bold text-xs flex items-center justify-center gap-1 shadow-lg shadow-gold-primary/20 transition"
+                  className="py-3 bg-gold-primary hover:bg-gold-light text-background rounded-xl font-bold text-xs flex items-center justify-center gap-1 shadow-lg shadow-gold-primary/20 transition active:scale-95"
                 >
-                  <span>Finalizar Viaje</span>
+                  <span>{activeTrip.serviceType === 'REMOLCADA' ? 'Finalizar Auxilio' : 'Finalizar Viaje'}</span>
                 </button>
               </div>
             </motion.div>
