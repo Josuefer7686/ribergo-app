@@ -9,7 +9,8 @@ export interface DestinationOption {
 export interface DriverData {
   id: string;
   name: string;
-  rating: number;
+  rating: number | null;
+  ratingsCount?: number;
   trips: number;
   motorcycle: string;
   plate: string;

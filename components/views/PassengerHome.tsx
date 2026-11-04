@@ -134,8 +134,8 @@ export const PassengerHome = () => {
           id: rideData.driverId,
           name: rideData.driverName || 'Mototaxista RiberGO',
           phone: rideData.driverPhone || '+591 70000000',
-          rating: rideData.driverRating || 5.0,
-          trips: 15,
+          rating: typeof rideData.driverRating === 'number' ? rideData.driverRating : null,
+          trips: typeof rideData.driver?.trips === 'number' ? rideData.driver.trips : 0,
           avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=150&q=80',
           motorcycle: rideData.motorcycle || 'Honda Wave 110',
           plate: rideData.plate || 'RBT-100',
@@ -159,8 +159,8 @@ export const PassengerHome = () => {
           id: rideData.driverId,
           name: rideData.driverName || 'Mototaxista RiberGO',
           phone: rideData.driverPhone || '+591 70000000',
-          rating: rideData.driverRating || 5.0,
-          trips: 15,
+          rating: typeof rideData.driverRating === 'number' ? rideData.driverRating : null,
+          trips: typeof rideData.driver?.trips === 'number' ? rideData.driver.trips : 0,
           avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=150&q=80',
           motorcycle: rideData.motorcycle || 'Honda Wave 110',
           plate: rideData.plate || 'RBT-100',
@@ -264,25 +264,21 @@ export const PassengerHome = () => {
     }
   };
 
-  const handleFinishTrip = async () => {
+  const handleFinishTrip = async (skipRating = false) => {
     haptics.success();
     audio.passengerTripFinished();
+    const effectiveDriverId = assignedDriver?.id || activeTrip?.driver?.id || (activeTrip as any)?.driverId || '';
+    const ratingToSend = skipRating ? 0 : rating;
+
     if (activeTrip?.id) {
-      await apiService.finishTripAndArchive(activeTrip.id, {
-        passengerId: user?.id || 'passenger_demo',
+      await apiService.submitPassengerRating(activeTrip.id, {
+        driverId: effectiveDriverId,
+        rating: ratingToSend,
+        comment: !skipRating && reviewText.trim() ? reviewText.trim() : undefined,
         passengerName: user?.name || 'Pasajero',
-        passengerPhone: user?.phone || '',
-        driverId: assignedDriver?.id || activeTrip.driver?.id || '',
-        driverName: assignedDriver?.name || activeTrip.driver?.name || 'Conductor',
-        driverPhone: assignedDriver?.phone || '',
-        vehicle: assignedDriver?.motorcycle || '',
-        price: activeTrip.price || 10,
-        pickup: currentLocation?.name || 'Mi Ubicación',
-        destination: destination?.name || 'Destino',
-        status: 'COMPLETED',
-        rating: rating,
       });
     }
+
     if (activeTrip && assignedDriver) {
       addTripToHistory({
         id: activeTrip.id,
@@ -292,12 +288,13 @@ export const PassengerHome = () => {
         destination: destination?.name || 'Destino',
         price: activeTrip.price,
         driverName: assignedDriver.name,
-        driverRating: rating,
+        driverRating: ratingToSend > 0 ? ratingToSend : 5,
         motorcycle: assignedDriver.motorcycle,
         status: 'COMPLETED',
         group: 'TODAY',
       });
     }
+
     resetRide();
   };
 
@@ -603,7 +600,7 @@ export const PassengerHome = () => {
                     <h4 className="text-sm font-bold text-white">{assignedDriver.name}</h4>
                     <div className="flex items-center gap-1 text-gold-primary text-xs font-bold">
                       <Star className="w-3.5 h-3.5 fill-gold-primary" />
-                      <span>{assignedDriver.rating}</span>
+                      <span>{assignedDriver.rating ? Number(assignedDriver.rating).toFixed(1) : 'Nuevo ✨'}</span>
                     </div>
                   </div>
                   <p className="text-xs text-text-secondary mt-0.5">{assignedDriver.trips} viajes completados</p>
@@ -801,19 +798,54 @@ export const PassengerHome = () => {
                 )}
               </div>
 
-              {/* Rating selector */}
-              <div className="p-4 rounded-2xl bg-surface-2 border border-border-custom space-y-2">
-                <p className="text-xs font-semibold text-text-secondary uppercase">Califica tu viaje</p>
-                <div className="flex justify-center gap-2 py-1">
+              {/* Rating selector atractivo e interactivo con estrellas */}
+              <div className="p-4 rounded-3xl bg-surface-2 border border-border-custom space-y-3">
+                <div className="flex items-center justify-between">
+                  <p className="text-xs font-black text-white uppercase tracking-wider">¿Cómo estuvo el servicio?</p>
+                  <span className="text-[11px] font-bold text-gold-primary">
+                    {rating === 5 && '¡Excelente! 🌟 100 puntos'}
+                    {rating === 4 && 'Muy bueno 👍'}
+                    {rating === 3 && 'Regular 😐'}
+                    {rating === 2 && 'Podría mejorar 👎'}
+                    {rating === 1 && 'Malo ⚠️'}
+                  </span>
+                </div>
+
+                <div className="flex justify-center gap-2.5 py-1">
                   {[1, 2, 3, 4, 5].map((star) => (
                     <button
                       key={star}
-                      onClick={() => setRating(star)}
-                      className="p-1 transition transform active:scale-125"
+                      type="button"
+                      onClick={() => {
+                        haptics.selection();
+                        setRating(star);
+                      }}
+                      className="p-1 transition-all transform active:scale-125 hover:scale-110"
                     >
                       <Star
-                        className={`w-7 h-7 ${star <= rating ? 'fill-gold-primary text-gold-primary' : 'text-text-secondary'}`}
+                        className={`w-8 h-8 transition-colors ${
+                          star <= rating 
+                            ? 'fill-gold-primary text-gold-primary drop-shadow-[0_0_8px_rgba(244,197,66,0.6)]' 
+                            : 'text-neutral-600'
+                        }`}
                       />
+                    </button>
+                  ))}
+                </div>
+
+                {/* Elogios rápidos clickables */}
+                <div className="flex gap-1.5 overflow-x-auto pb-1 no-scrollbar pt-1">
+                  {['🏍️ Conducción segura', '😊 Muy amable', '⏱️ Llegó al toque', '✨ Moto limpia', '💰 Tarifa justa'].map((compliment) => (
+                    <button
+                      key={compliment}
+                      type="button"
+                      onClick={() => {
+                        haptics.selection();
+                        setReviewText(prev => prev ? `${prev}, ${compliment}` : compliment);
+                      }}
+                      className="px-2.5 py-1.5 rounded-xl bg-surface hover:bg-gold-primary/20 border border-gold-primary/30 text-white font-semibold text-[11px] whitespace-nowrap active:scale-95 transition shrink-0"
+                    >
+                      {compliment}
                     </button>
                   ))}
                 </div>
@@ -822,17 +854,28 @@ export const PassengerHome = () => {
                   type="text"
                   value={reviewText}
                   onChange={(e) => setReviewText(e.target.value)}
-                  placeholder="Cuéntanos cómo fue tu viaje (opcional)"
-                  className="w-full bg-surface border border-border-custom rounded-xl py-2 px-3 text-xs text-white placeholder-text-secondary focus:outline-none focus:border-gold-primary"
+                  placeholder="Escribe un comentario para el conductor (opcional)..."
+                  className="w-full bg-surface border border-border-custom rounded-2xl py-2.5 px-3.5 text-xs text-white placeholder-text-secondary focus:outline-none focus:border-gold-primary transition"
                 />
               </div>
 
-              <button
-                onClick={handleFinishTrip}
-                className="w-full py-3.5 bg-gold-primary hover:bg-gold-light text-background rounded-xl font-black text-sm shadow-xl shadow-gold-primary/20 transition"
-              >
-                Finalizar
-              </button>
+              <div className="space-y-2 pt-1">
+                <button
+                  onClick={() => handleFinishTrip(false)}
+                  className="w-full py-3.5 bg-gradient-to-r from-gold-primary via-amber-400 to-yellow-500 text-background rounded-2xl font-black text-sm uppercase tracking-wider shadow-xl shadow-gold-primary/25 hover:brightness-110 transition active:scale-95 flex items-center justify-center gap-2"
+                >
+                  <Check className="w-4 h-4 stroke-[3]" />
+                  <span>Calificar y Finalizar</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => handleFinishTrip(true)}
+                  className="w-full py-2 text-xs font-semibold text-text-secondary hover:text-white transition"
+                >
+                  Omitir calificación
+                </button>
+              </div>
             </motion.div>
           )}
         </AnimatePresence>
@@ -918,7 +961,7 @@ export const PassengerHome = () => {
                   <div className="flex items-center gap-2 mt-0.5 text-xs text-text-secondary">
                     <span className="flex items-center gap-1 text-gold-primary font-bold">
                       <Star className="w-3.5 h-3.5 fill-gold-primary" />
-                      <span>{selectedDriver.rating ? Number(selectedDriver.rating).toFixed(1) : '5.0'}</span>
+                      <span>{selectedDriver.rating ? Number(selectedDriver.rating).toFixed(1) : 'Nuevo ✨'}</span>
                     </span>
                     <span>•</span>
                     <span>{selectedDriver.trips ?? 0} viajes</span>

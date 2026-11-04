@@ -33,6 +33,40 @@ const formatAuthIdentifier = (identifier: string): string => {
   return `${numericPhone}@ribergo.bo`;
 };
 
+export interface DriverTripRecord {
+  id: string;
+  date: string;       // e.g. "Hoy" o "04 Nov 2026"
+  time: string;       // e.g. "17:45"
+  isoDate: string;    // "YYYY-MM-DD"
+  pickup: string;
+  destination: string;
+  price: number;
+  passengerName: string;
+  passengerId?: string;
+  passengerPhone?: string;
+  rating?: number;    // Calificación en estrellas (1 - 5)
+  comment?: string;   // Reseña del pasajero
+  status: 'COMPLETED';
+  completedAtMs: number;
+}
+
+export interface DriverBox {
+  driverId: string;
+  driverName?: string;
+  driverPhone?: string;
+  motorcycle?: string;
+  plate?: string;
+  totalIncome: number;
+  todayIncome: number;
+  todayDate: string; // "YYYY-MM-DD"
+  totalTrips: number;
+  ratingsCount: number; // Cantidad de personas que lo han calificado
+  ratingsSum: number;   // Suma de estrellas recibidas
+  rating: number | null; // Promedio real (null si ratingsCount === 0)
+  trips: DriverTripRecord[];
+  updatedAtMs: number;
+}
+
 // ============================================================================
 // REALTIME MULTI-TAB & FIRESTORE HYBRID SYNC BUS
 // Garantiza 0ms de latencia en pruebas locales entre pestañas (BroadcastChannel + LocalStorage Event)
@@ -468,7 +502,8 @@ export const apiService = {
           name: userMetadata?.name || 'Usuario ' + (user.phoneNumber || ''),
           phone: user.phoneNumber || '',
           email: `${user.phoneNumber?.replace(/[^0-9]/g, '') || 'user'}@ribergo.bo`,
-          rating: 5.0,
+          rating: null,
+          ratingsCount: 0,
           trips: 0,
           role: userMetadata?.role || 'PASSENGER',
         };
@@ -491,7 +526,8 @@ export const apiService = {
       name: userMetadata?.name || 'Usuario RiberGO SMS',
       phone: '+591 71234567',
       email: 'demo@ribergo.bo',
-      rating: 5.0,
+      rating: null,
+      ratingsCount: 0,
       trips: 0,
       role: userMetadata?.role || 'PASSENGER',
     };
@@ -513,7 +549,8 @@ export const apiService = {
           name: name || 'Usuario RiberGO',
           phone: phone || '+591 70000000',
           email: authIdentifier,
-          rating: 5.0,
+          rating: null,
+          ratingsCount: 0,
           trips: 0,
           role: role,
           motorcycle: role === 'DRIVER' ? 'Honda Wave 110' : undefined,
@@ -540,7 +577,8 @@ export const apiService = {
       name,
       phone: phone || '+591 70000000',
       email: authIdentifier,
-      rating: 5.0,
+      rating: null,
+      ratingsCount: 0,
       trips: 0,
       role,
       motorcycle: role === 'DRIVER' ? 'Honda Wave 110' : undefined,
@@ -605,7 +643,8 @@ export const apiService = {
           email: user.email || '',
           phone: user.phoneNumber || '+591 70000000',
           avatar: user.photoURL || undefined,
-          rating: 5.0,
+          rating: null,
+          ratingsCount: 0,
           trips: 0,
           role: 'PASSENGER',
         };
@@ -628,7 +667,8 @@ export const apiService = {
       name: 'Usuario Google RiberGO',
       email: 'usuario@gmail.com',
       phone: '+591 71234567',
-      rating: 5.0,
+      rating: null,
+      ratingsCount: 0,
       trips: 0,
       role: 'PASSENGER',
     };
@@ -643,7 +683,7 @@ export const apiService = {
     phone: string, 
     motorcycle: string, 
     plate: string, 
-    rating: number, 
+    rating: number | null, 
     location: LocationPoint, 
     isOnline: boolean,
     heading: number = 0,
@@ -655,9 +695,21 @@ export const apiService = {
     let realPhone = phone;
     let realMotorcycle = motorcycle;
     let realPlate = plate;
-    let realRating = rating;
+    let realRating: number | null = rating;
     let realTrips = trips;
     let realAvatar = avatar;
+
+    // Obtener datos del casillero único del conductor para reflejar calificación real
+    if (driverId) {
+      try {
+        const box = await this.getDriverBox(driverId);
+        realRating = box.rating;
+        realTrips = box.totalTrips;
+        if (box.driverName) realName = box.driverName;
+        if (box.motorcycle) realMotorcycle = box.motorcycle;
+        if (box.plate) realPlate = box.plate;
+      } catch (e) {}
+    }
 
     // Fetch latest genuine profile from Firestore 'users' collection if available
     if (isFirebaseConfigured() && driverId) {
@@ -669,7 +721,7 @@ export const apiService = {
           if (uData.phone) realPhone = uData.phone;
           if (uData.motorcycle) realMotorcycle = uData.motorcycle;
           if (uData.plate) realPlate = uData.plate;
-          if (typeof uData.rating === 'number') realRating = uData.rating;
+          if (typeof uData.rating === 'number' || uData.rating === null) realRating = uData.rating;
           if (typeof uData.trips === 'number') realTrips = uData.trips;
           if (uData.avatar) realAvatar = uData.avatar;
         }
@@ -764,7 +816,7 @@ export const apiService = {
                 id: docSnap.id,
                 name: data.name || 'Conductor',
                 phone: data.phone || '',
-                rating: typeof data.rating === 'number' ? data.rating : 5.0,
+                rating: typeof data.rating === 'number' ? data.rating : null,
                 trips: typeof data.trips === 'number' ? data.trips : 0,
                 avatar: data.avatar || '',
                 motorcycle: data.motorcycle || '',
@@ -885,14 +937,266 @@ export const apiService = {
   },
 
   /**
-   * Complete trip, save permanent forensic record to 'trips_history' and AUTODESTROY from rides
+   * Obtener el casillero único del conductor (persistencia local + Firestore)
    */
-  async finishTripAndArchive(rideId: string, tripSummary: any) {
-    if (!rideId) return;
+  async getDriverBox(driverId: string): Promise<DriverBox> {
+    const todayStr = new Date().toISOString().slice(0, 10);
+    const localKey = `ribergo_driver_box_${driverId}`;
+    let box: DriverBox = {
+      driverId,
+      totalIncome: 0,
+      todayIncome: 0,
+      todayDate: todayStr,
+      totalTrips: 0,
+      ratingsCount: 0,
+      ratingsSum: 0,
+      rating: null,
+      trips: [],
+      updatedAtMs: Date.now(),
+    };
 
-    // 1. Guardar en el historial permanente inmutable de seguridad
+    if (typeof window !== 'undefined') {
+      try {
+        const raw = localStorage.getItem(localKey);
+        if (raw) {
+          box = { ...box, ...JSON.parse(raw) };
+        }
+      } catch (e) {}
+    }
+
+    if (isFirebaseConfigured() && driverId) {
+      try {
+        const snap = await getDoc(doc(db, 'driver_boxes', driverId));
+        if (snap.exists()) {
+          const remoteData = snap.data() as Partial<DriverBox>;
+          box = {
+            ...box,
+            ...remoteData,
+            trips: remoteData.trips || box.trips || [],
+          };
+        }
+      } catch (err) {
+        console.warn('Error fetching driver box from Firestore:', err);
+      }
+    }
+
+    // Recalcular ingresos y calificación dinámicamente con base en los viajes reales
+    if (box.trips && Array.isArray(box.trips)) {
+      box.totalTrips = box.trips.length;
+      box.totalIncome = box.trips.reduce((acc, t) => acc + (Number(t.price) || 0), 0);
+      const todayTrips = box.trips.filter((t) => t.isoDate === todayStr || t.date === 'Hoy');
+      box.todayIncome = todayTrips.reduce((acc, t) => acc + (Number(t.price) || 0), 0);
+      box.todayDate = todayStr;
+      if (box.ratingsCount > 0 && box.ratingsSum > 0) {
+        box.rating = Number((box.ratingsSum / box.ratingsCount).toFixed(2));
+      } else {
+        box.rating = null;
+      }
+    }
+
+    if (typeof window !== 'undefined') {
+      try {
+        localStorage.setItem(localKey, JSON.stringify(box));
+      } catch (e) {}
+    }
+
+    return box;
+  },
+
+  /**
+   * Suscribirse en tiempo real al casillero único del conductor
+   */
+  subscribeToDriverBox(driverId: string, callback: (box: DriverBox) => void): () => void {
+    if (!driverId) return () => {};
+
+    // 1. Notificar inmediatamente con el casillero local
+    this.getDriverBox(driverId).then(callback).catch(() => {});
+
+    // 2. Suscribirse a cambios en Firestore
+    let unsub = () => {};
     if (isFirebaseConfigured()) {
       try {
+        unsub = onSnapshot(doc(db, 'driver_boxes', driverId), (snap) => {
+          if (snap.exists()) {
+            const data = snap.data() as DriverBox;
+            const todayStr = new Date().toISOString().slice(0, 10);
+            const trips = data.trips || [];
+            const todayTrips = trips.filter((t) => t.isoDate === todayStr || t.date === 'Hoy');
+            const fullBox: DriverBox = {
+              ...data,
+              trips,
+              totalTrips: trips.length,
+              totalIncome: trips.reduce((acc, t) => acc + (Number(t.price) || 0), 0),
+              todayIncome: todayTrips.reduce((acc, t) => acc + (Number(t.price) || 0), 0),
+              todayDate: todayStr,
+              rating: (data.ratingsCount || 0) > 0 ? Number(((data.ratingsSum || 0) / data.ratingsCount).toFixed(2)) : null,
+            };
+            if (typeof window !== 'undefined') {
+              try {
+                localStorage.setItem(`ribergo_driver_box_${driverId}`, JSON.stringify(fullBox));
+              } catch (e) {}
+            }
+            callback(fullBox);
+          }
+        });
+      } catch (err) {
+        console.warn('Error subscribing to driver box:', err);
+      }
+    }
+
+    return () => unsub();
+  },
+
+  /**
+   * Agregar un viaje completado al casillero único del conductor
+   */
+  async addTripToDriverBox(driverId: string, trip: DriverTripRecord): Promise<DriverBox> {
+    const box = await this.getDriverBox(driverId);
+    
+    // Evitar duplicados
+    const existingIndex = box.trips.findIndex((t) => t.id === trip.id);
+    if (existingIndex >= 0) {
+      box.trips[existingIndex] = { ...box.trips[existingIndex], ...trip };
+    } else {
+      box.trips.unshift(trip);
+    }
+
+    box.totalTrips = box.trips.length;
+    box.totalIncome = box.trips.reduce((acc, t) => acc + (Number(t.price) || 0), 0);
+    const todayStr = new Date().toISOString().slice(0, 10);
+    const todayTrips = box.trips.filter((t) => t.isoDate === todayStr || t.date === 'Hoy');
+    box.todayIncome = todayTrips.reduce((acc, t) => acc + (Number(t.price) || 0), 0);
+    box.updatedAtMs = Date.now();
+
+    // Guardar en LocalStorage
+    if (typeof window !== 'undefined') {
+      try {
+        localStorage.setItem(`ribergo_driver_box_${driverId}`, JSON.stringify(box));
+      } catch (e) {}
+    }
+
+    // Guardar en Firestore
+    if (isFirebaseConfigured() && driverId) {
+      try {
+        await setDoc(doc(db, 'driver_boxes', driverId), {
+          ...box,
+          updatedAt: serverTimestamp(),
+        }, { merge: true }).catch(() => {});
+
+        // Actualizar contador de viajes en el perfil del usuario
+        await updateDoc(doc(db, 'users', driverId), {
+          trips: box.totalTrips,
+        }).catch(() => {});
+      } catch (err) {
+        console.warn('Error saving trip to driver box in Firestore:', err);
+      }
+    }
+
+    return box;
+  },
+
+  /**
+   * Registrar calificación (estrellas y comentario) otorgada por el pasajero en el casillero del conductor
+   */
+  async recordRatingInDriverBox(driverId: string, rideId: string, rating: number, comment?: string): Promise<DriverBox> {
+    const box = await this.getDriverBox(driverId);
+
+    // Actualizar el viaje en el casillero
+    const trip = box.trips.find((t) => t.id === rideId);
+    if (trip) {
+      trip.rating = rating;
+      if (comment) trip.comment = comment;
+    }
+
+    if (rating > 0) {
+      box.ratingsCount = (box.ratingsCount || 0) + 1;
+      box.ratingsSum = (box.ratingsSum || 0) + rating;
+      box.rating = Number((box.ratingsSum / box.ratingsCount).toFixed(2));
+    }
+
+    box.updatedAtMs = Date.now();
+
+    // Guardar en LocalStorage
+    if (typeof window !== 'undefined') {
+      try {
+        localStorage.setItem(`ribergo_driver_box_${driverId}`, JSON.stringify(box));
+      } catch (e) {}
+    }
+
+    // Guardar en Firestore y actualizar perfil de usuario y conductores en línea
+    if (isFirebaseConfigured() && driverId) {
+      try {
+        await setDoc(doc(db, 'driver_boxes', driverId), {
+          ...box,
+          updatedAt: serverTimestamp(),
+        }, { merge: true }).catch(() => {});
+
+        if (box.rating !== null) {
+          await updateDoc(doc(db, 'users', driverId), {
+            rating: box.rating,
+            ratingsCount: box.ratingsCount,
+          }).catch(() => {});
+
+          await updateDoc(doc(db, 'online_drivers', driverId), {
+            rating: box.rating,
+          }).catch(() => {});
+        }
+      } catch (err) {
+        console.warn('Error recording rating in driver box:', err);
+      }
+    }
+
+    return box;
+  },
+
+  /**
+   * Complete trip by driver:
+   * Sets status to 'COMPLETED' in both realtimeSyncBus and Firestore rides/{rideId}.
+   * Registers the trip in the driver's unique locker (casillero) with earnings.
+   * Keeps the ride document with status 'COMPLETED' so the passenger receives it and sees the rating modal!
+   */
+  async completeDriverTrip(rideId: string, tripSummary: any) {
+    if (!rideId) return;
+
+    // 1. Guardar en SyncBus en memoria como COMPLETED inmediatamente
+    const existing = realtimeSyncBus.getRide(rideId) || {};
+    const completedRide = {
+      ...existing,
+      id: rideId,
+      status: 'COMPLETED',
+      completedAtMs: Date.now(),
+      price: tripSummary.price || existing.price || 10,
+    };
+    realtimeSyncBus.saveRide(completedRide);
+
+    // 2. Registrar en el casillero exclusivo del conductor
+    if (tripSummary.driverId) {
+      await this.addTripToDriverBox(tripSummary.driverId, {
+        id: rideId,
+        date: 'Hoy',
+        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        isoDate: new Date().toISOString().slice(0, 10),
+        pickup: tripSummary.pickup || 'Origen',
+        destination: tripSummary.destination || 'Destino',
+        price: Number(tripSummary.price || 10),
+        passengerName: tripSummary.passengerName || 'Pasajero',
+        passengerId: tripSummary.passengerId,
+        passengerPhone: tripSummary.passengerPhone,
+        status: 'COMPLETED',
+        completedAtMs: Date.now(),
+      });
+    }
+
+    // 3. Notificar en Cloud Firestore para que el pasajero reciba status 'COMPLETED'
+    if (isFirebaseConfigured()) {
+      try {
+        await updateDoc(doc(db, 'rides', rideId), {
+          status: 'COMPLETED',
+          completedAt: serverTimestamp(),
+          completedAtMs: Date.now(),
+        }).catch(() => {});
+
+        // Respaldar en historial permanente inmutable de seguridad
         await setDoc(doc(db, 'trips_history', rideId), {
           id: rideId,
           ...tripSummary,
@@ -901,12 +1205,55 @@ export const apiService = {
           completedAt: serverTimestamp(),
         }).catch(() => {});
       } catch (err) {
-        console.warn('Error saving to trips_history:', err);
+        console.warn('Error completing trip in Firestore:', err);
       }
     }
+  },
 
-    // 2. Autodestruir de la cola en vivo 'rides'
-    await this.cancelRideRequest(rideId);
+  /**
+   * Complete trip legacy alias
+   */
+  async finishTripAndArchive(rideId: string, tripSummary: any) {
+    await this.completeDriverTrip(rideId, tripSummary);
+  },
+
+  /**
+   * El pasajero califica el viaje con estrellas y comentario:
+   * Actualiza la calificación en el casillero único del conductor.
+   * Recalcula el promedio de estrellas real del conductor.
+   * Ahora sí limpia el viaje activo de la cola 'rides'.
+   */
+  async submitPassengerRating(rideId: string, {
+    driverId,
+    rating,
+    comment,
+    passengerName,
+  }: {
+    driverId: string;
+    rating: number;
+    comment?: string;
+    passengerName?: string;
+  }) {
+    // 1. Actualizar calificación en el casillero del conductor si hubo calificación
+    if (driverId && rating > 0) {
+      await this.recordRatingInDriverBox(driverId, rideId, rating, comment);
+    }
+
+    // 2. Actualizar registro en trips_history
+    if (isFirebaseConfigured() && rideId) {
+      try {
+        await updateDoc(doc(db, 'trips_history', rideId), {
+          rating: rating > 0 ? rating : null,
+          comment: comment || '',
+          ratedAtMs: Date.now(),
+        }).catch(() => {});
+      } catch (e) {}
+    }
+
+    // 3. Limpiar de la cola activa 'rides'
+    if (rideId) {
+      await this.cancelRideRequest(rideId);
+    }
   },
 
   /**

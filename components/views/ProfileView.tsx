@@ -63,7 +63,7 @@ export const ProfileView = () => {
             <div className="flex items-center gap-2 mt-1">
               <span className="flex items-center gap-1 text-gold-primary text-xs font-bold">
                 <Star className="w-3.5 h-3.5 fill-gold-primary" />
-                <span>{user?.trips && user.trips > 0 ? user.rating : (user?.rating || 'Nuevo')}</span>
+                <span>{user?.rating ? Number(user.rating).toFixed(1) : 'Nuevo ✨'}</span>
               </span>
               <span className="text-[10px] text-text-secondary">• {user?.trips || 0} viajes</span>
             </div>

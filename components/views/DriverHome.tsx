@@ -79,7 +79,7 @@ export const DriverHome = () => {
   const driverPhone = user?.phone || '';
   const motorcycle = user?.motorcycle || '';
   const plate = user?.plate || '';
-  const rating = user?.rating ?? 5.0;
+  const rating = user?.rating ?? null;
   const trips = user?.trips ?? 0;
   const avatar = user?.avatar || '';
 
@@ -376,8 +376,8 @@ export const DriverHome = () => {
       id: driverId,
       name: driverName,
       phone: driverPhone,
-      rating: 5.0,
-      trips: 24,
+      rating: rating,
+      trips: trips,
       avatar: user?.avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=150&q=80',
       motorcycle,
       plate,
@@ -450,8 +450,9 @@ export const DriverHome = () => {
 
   const handleFinishDriverTrip = async () => {
     haptics.success();
+    audio.driverTripAccepted();
     if (activeTrip?.id) {
-      await apiService.finishTripAndArchive(activeTrip.id, {
+      await apiService.completeDriverTrip(activeTrip.id, {
         passengerId: (activeTrip as any).passengerId || '',
         passengerName: activeTrip.passengerName || 'Pasajero',
         passengerPhone: activeTrip.passengerPhone || '',
@@ -463,7 +464,6 @@ export const DriverHome = () => {
         pickup: activeTrip.pickup?.name || 'Origen',
         destination: activeTrip.destination?.name || 'Destino',
         status: 'COMPLETED',
-        rating: 5,
       });
     }
     if (activeTrip) {
@@ -475,7 +475,7 @@ export const DriverHome = () => {
         destination: activeTrip.destination.name || 'Destino',
         price: activeTrip.price,
         driverName: activeTrip.passengerName || 'Pasajero',
-        driverRating: 5,
+        driverRating: typeof rating === 'number' ? rating : 5,
         motorcycle: motorcycle,
         status: 'COMPLETED',
         group: 'TODAY',

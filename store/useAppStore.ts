@@ -42,7 +42,8 @@ export type UserProfile = {
   phone: string;
   email: string;
   avatar?: string;
-  rating: number;
+  rating?: number | null;
+  ratingsCount?: number;
   trips: number;
   role: UserRole;
   // Driver specific
@@ -419,6 +420,7 @@ export const useAppStore = create<AppState>()(
         role: state.role,
         currentView: state.user ? (state.currentView === 'SPLASH' ? 'MAIN_APP' : state.currentView) : state.currentView,
         preferences: state.preferences,
+        tripsHistory: state.tripsHistory,
       }),
     }
   )
