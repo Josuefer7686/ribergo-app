@@ -78,24 +78,8 @@ export default function App() {
     }
   }, [currentView, setCurrentView]);
 
-  // Auto Fullscreen on first user touch/click
-  const handleUserInteraction = () => {
-    if (typeof document !== 'undefined' && !document.fullscreenElement) {
-      const elem = document.documentElement as any;
-      if (elem.requestFullscreen) {
-        elem.requestFullscreen().catch(() => {});
-      } else if (elem.webkitRequestFullscreen) {
-        elem.webkitRequestFullscreen().catch(() => {});
-      }
-    }
-  };
-
   return (
-    <main 
-      onClick={handleUserInteraction}
-      onTouchStart={handleUserInteraction}
-      className="w-full h-full h-[100dvh] relative bg-background text-white flex flex-col overflow-hidden select-none"
-    >
+    <main className="w-full h-full h-[100dvh] relative bg-background text-white flex flex-col overflow-hidden select-none">
       {currentView === 'SPLASH' && <SplashView />}
       {currentView === 'LOGIN' && <LoginView />}
       {currentView === 'REGISTER' && <RegisterView />}

@@ -1,12 +1,12 @@
 'use client';
 
-import { useEffect, useState, useRef, useMemo } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { MapContainer, TileLayer, Marker, Popup, useMap, useMapEvents, Polyline } from 'react-leaflet';
 import L from 'leaflet';
 import { useAppStore } from '@/store/useAppStore';
 import { DriverData } from '@/services/mockData';
 import { apiService } from '@/services/apiService';
-import { Bike, Navigation } from 'lucide-react';
+import { Bike } from 'lucide-react';
 import { haptics } from '@/utils/haptics';
 import { audio } from '@/utils/audio';
 import { fetchLiveRoute } from '@/utils/routing';
@@ -122,51 +122,31 @@ function getMotoIcon(active = false, heading = 0, isMoving = false, scale = 1.0)
 
 function MapInteractionTracker({ 
   onMapClick, 
-  onUserInteraction,
   onZoomChange 
 }: { 
   onMapClick: () => void; 
-  onUserInteraction: () => void;
   onZoomChange: (z: number) => void;
 }) {
   useMapEvents({
     click: () => onMapClick(),
-    dragstart: () => onUserInteraction(),
-    zoomstart: () => onUserInteraction(),
     zoomend: (e) => onZoomChange(e.target.getZoom()),
   });
   return null;
 }
 
 /**
- * MapUpdater handles framing and user-initiated centering:
- * 1. Initial framing on startup.
- * 2. Automatic framing ONCE when a new trip phase begins (e.g. RIDE_REQUEST or TRIP_STARTED).
- * 3. NEVER automatically hijacks or snaps the camera back while the user is panning/zooming.
- * 4. Recenter button explicitly flies back to user position.
+ * MapUpdater:
+ * STRICT RULE: ZERO automatic camera recentering or auto-zoom!
+ * The map camera NEVER moves on its own when going online, receiving trips, or panning/zooming.
+ * The ONLY action that recenters the camera is when the user explicitly clicks the "Mi Ubicación" button.
  */
 function MapUpdater({ 
-  centerLat, 
-  centerLng, 
-  selectedDriverLocation,
   recenterTrigger = 0,
-  routeBounds = null,
-  tripPhaseKey = '',
-  userInteractedRef,
 }: { 
-  centerLat: number;
-  centerLng: number;
-  selectedDriverLocation?: [number, number] | null;
   recenterTrigger?: number;
-  routeBounds?: [[number, number], [number, number]] | null;
-  tripPhaseKey?: string;
-  userInteractedRef: React.MutableRefObject<boolean>;
 }) {
   const map = useMap();
-  const hasInitializedRef = useRef<boolean>(false);
-  const prevTripPhaseRef = useRef<string>('');
-  const isDefaultPlaza = Math.abs(centerLat - (-11.0061)) < 0.0001 && Math.abs(centerLng - (-66.0747)) < 0.0001;
-  const hasAcquiredRealGpsRef = useRef<boolean>(!isDefaultPlaza);
+  const prevTriggerRef = useRef<number>(recenterTrigger);
 
   // Invalidate map size once on mount
   useEffect(() => {
@@ -176,42 +156,9 @@ function MapUpdater({
     return () => clearTimeout(timer);
   }, [map]);
 
-  // Initial load: center on coordinates once
-  useEffect(() => {
-    if (!hasInitializedRef.current) {
-      hasInitializedRef.current = true;
-      map.setView([centerLat, centerLng], 15, { animate: false });
-    }
-  }, [centerLat, centerLng, map]);
-
-  // First time real GPS is acquired (if app mounted before geolocation resolved)
-  useEffect(() => {
-    if (!hasAcquiredRealGpsRef.current && !isDefaultPlaza && !userInteractedRef.current) {
-      hasAcquiredRealGpsRef.current = true;
-      try {
-        map.flyTo([centerLat, centerLng], 16, { animate: true, duration: 0.8 });
-      } catch {
-        map.setView([centerLat, centerLng], 16);
-      }
-    }
-  }, [centerLat, centerLng, isDefaultPlaza, map, userInteractedRef]);
-
-  // Frame route ONCE when a new trip state starts (e.g., incoming ride request or trip started)
-  useEffect(() => {
-    if (tripPhaseKey && tripPhaseKey !== prevTripPhaseRef.current) {
-      prevTripPhaseRef.current = tripPhaseKey;
-      if (routeBounds) {
-        userInteractedRef.current = false;
-        map.stop();
-        map.fitBounds(routeBounds, { padding: [70, 70], maxZoom: 16 });
-      }
-    }
-  }, [tripPhaseKey, routeBounds, map, userInteractedRef]);
-
-  // Recenter map immediately on custom event (fired by "Mi Ubicación" button)
+  // Recenter map ONLY when the "Mi Ubicación" custom event fires
   useEffect(() => {
     const handleRecenter = (e?: any) => {
-      userInteractedRef.current = false;
       const state = useAppStore.getState();
       const targetLat = e?.detail?.lat ?? state.currentLocation?.lat ?? -11.0061;
       const targetLng = e?.detail?.lng ?? state.currentLocation?.lng ?? -66.0747;
@@ -219,7 +166,7 @@ function MapUpdater({
       map.stop();
       map.invalidateSize();
       try {
-        map.flyTo([targetLat, targetLng], 16, { animate: true, duration: 0.7 });
+        map.flyTo([targetLat, targetLng], 16, { animate: true, duration: 0.6 });
       } catch {
         map.setView([targetLat, targetLng], 16, { animate: true });
       }
@@ -227,32 +174,24 @@ function MapUpdater({
 
     window.addEventListener('ribergo:recenter_map', handleRecenter);
     return () => window.removeEventListener('ribergo:recenter_map', handleRecenter);
-  }, [map, userInteractedRef]);
+  }, [map]);
 
-  // Fly to user location when recenterTrigger prop increments
+  // Recenter map ONLY when the "Mi Ubicación" button increments recenterTrigger
   useEffect(() => {
-    if (recenterTrigger > 0) {
-      userInteractedRef.current = false;
+    if (recenterTrigger > 0 && recenterTrigger !== prevTriggerRef.current) {
+      prevTriggerRef.current = recenterTrigger;
       const state = useAppStore.getState();
-      const targetLat = state.currentLocation?.lat ?? centerLat;
-      const targetLng = state.currentLocation?.lng ?? centerLng;
+      const targetLat = state.currentLocation?.lat ?? -11.0061;
+      const targetLng = state.currentLocation?.lng ?? -66.0747;
       map.stop();
       map.invalidateSize();
       try {
-        map.flyTo([targetLat, targetLng], 16, { animate: true, duration: 0.7 });
+        map.flyTo([targetLat, targetLng], 16, { animate: true, duration: 0.6 });
       } catch {
         map.setView([targetLat, targetLng], 16, { animate: true });
       }
     }
-  }, [recenterTrigger, map, centerLat, centerLng, userInteractedRef]);
-
-  // Smoothly pan towards selected driver if tapped
-  useEffect(() => {
-    if (selectedDriverLocation) {
-      map.stop();
-      map.panTo(selectedDriverLocation, { animate: true, duration: 0.45 });
-    }
-  }, [selectedDriverLocation, map]);
+  }, [recenterTrigger, map]);
 
   return null;
 }
@@ -267,7 +206,12 @@ export default function MapComponent() {
   } = useAppStore();
 
   const [currentZoom, setCurrentZoom] = useState<number>(15);
-  const userInteractedRef = useRef<boolean>(false);
+
+  // Initial center on mount (never recalculated)
+  const [mapCenter] = useState<[number, number]>(() => [
+    currentLocation?.lat ?? -11.0061,
+    currentLocation?.lng ?? -66.0747,
+  ]);
 
   // Service type: MOTOTAXI or REMOLCADA / AUXILIO
   const serviceType = activeTrip?.serviceType || pendingRequest?.serviceType || urbanServiceType || 'MOTOTAXI';
@@ -287,36 +231,26 @@ export default function MapComponent() {
   // Real assigned driver lookup
   const liveAssignedDriver = activeDriversList.find((d) => d.id === assignedDriver?.id) || assignedDriver;
 
-  // Selected driver coordinate for map pan
+  // Selected driver coordinate
   const selectedDriver = activeDriversList.find((d) => d.id === selectedDriverId) || null;
-  const selectedDriverLocation: [number, number] | null = selectedDriver?.currentLocation 
-    ? [selectedDriver.currentLocation.lat, selectedDriver.currentLocation.lng] 
-    : null;
-
-  const centerLat = currentLocation ? currentLocation.lat : -11.0061;
-  const centerLng = currentLocation ? currentLocation.lng : -66.0747;
-  const center = useMemo<[number, number]>(() => [centerLat, centerLng], [centerLat, centerLng]); 
 
   // =========================================================================
   // DYNAMIC ROUTE DETERMINATION
   // =========================================================================
   let routeOrigin: [number, number] | null = null;
   let routeTarget: [number, number] | null = null;
-  let tripPhaseKey = '';
 
   if (role === 'PASSENGER') {
     if (passengerState === 'CONFIRMING' && currentLocation && destination?.lat && destination?.lng) {
       // Pre-booking route preview
       routeOrigin = [currentLocation.lat, currentLocation.lng];
       routeTarget = [destination.lat, destination.lng];
-      tripPhaseKey = `passenger_confirming_${destination.lat}_${destination.lng}`;
     } else if ((passengerState === 'DRIVER_FOUND' || passengerState === 'NEGOTIATING') && liveAssignedDriver?.currentLocation) {
       // Assigned driver is heading to passenger's pickup spot
       routeOrigin = [liveAssignedDriver.currentLocation.lat, liveAssignedDriver.currentLocation.lng];
       routeTarget = currentLocation 
         ? [currentLocation.lat, currentLocation.lng] 
         : (activeTrip?.pickup ? [activeTrip.pickup.lat, activeTrip.pickup.lng] : null);
-      tripPhaseKey = `passenger_driver_coming_${activeTrip?.id || ''}`;
     } else if (passengerState === 'TRIP_STARTED') {
       // Passenger picked up! Route towards destination
       const dest = activeTrip?.destination || destination;
@@ -325,7 +259,6 @@ export default function MapComponent() {
           ? [liveAssignedDriver.currentLocation.lat, liveAssignedDriver.currentLocation.lng]
           : (currentLocation ? [currentLocation.lat, currentLocation.lng] : null);
         routeTarget = [dest.lat, dest.lng];
-        tripPhaseKey = `passenger_trip_started_${activeTrip?.id || ''}`;
       }
     }
   } else if (role === 'DRIVER') {
@@ -333,19 +266,16 @@ export default function MapComponent() {
       // 🌟 DRIVER SEES INCOMING TRIP: Trace route from driver's GPS to passenger pickup!
       routeOrigin = [currentLocation.lat, currentLocation.lng];
       routeTarget = [pendingRequest.pickup.lat, pendingRequest.pickup.lng];
-      tripPhaseKey = `driver_request_${pendingRequest.id}`;
     } else if ((driverState === 'GOING_TO_PASSENGER' || activeTrip?.status === 'GOING_TO_PASSENGER' || activeTrip?.status === 'NEGOTIATING') && activeTrip?.pickup && currentLocation) {
       // Driver accepted and is navigating to passenger's pickup location
       routeOrigin = [currentLocation.lat, currentLocation.lng];
       routeTarget = [activeTrip.pickup.lat, activeTrip.pickup.lng];
-      tripPhaseKey = `driver_going_to_pickup_${activeTrip.id}`;
     } else if (driverState === 'TRIP_STARTED' && currentLocation) {
       // 🌟 TRIP STARTED: Driver picked up passenger, route stays visible all the way to destination!
       const tripDest = activeTrip?.destination || destination;
       if (tripDest?.lat && tripDest?.lng) {
         routeOrigin = [currentLocation.lat, currentLocation.lng];
         routeTarget = [tripDest.lat, tripDest.lng];
-        tripPhaseKey = `driver_trip_started_${activeTrip?.id || ''}`;
       }
     }
   }
@@ -389,17 +319,13 @@ export default function MapComponent() {
     };
   }, [originKey, targetKey, routeOrigin, routeTarget]);
 
-  // Route bounds for auto-framing on initial transition
-  const routeBounds: [[number, number], [number, number]] | null = 
-    (routeOrigin && routeTarget) ? [routeOrigin, routeTarget] : null;
-
   // Dynamic zoom scale factor for markers
   const markerScale = getZoomScale(currentZoom);
 
   return (
     <div className="w-full h-full absolute inset-0 z-0 overflow-hidden">
       <MapContainer 
-        center={center} 
+        center={mapCenter} 
         zoom={15} 
         minZoom={12}
         maxZoom={19}
@@ -414,19 +340,10 @@ export default function MapComponent() {
           maxNativeZoom={19}
         />
         <MapUpdater 
-          centerLat={centerLat} 
-          centerLng={centerLng} 
-          selectedDriverLocation={selectedDriverLocation}
           recenterTrigger={mapRecenterTrigger}
-          routeBounds={routeBounds}
-          tripPhaseKey={tripPhaseKey}
-          userInteractedRef={userInteractedRef}
         />
         <MapInteractionTracker 
           onMapClick={() => setSelectedDriverId(null)} 
-          onUserInteraction={() => {
-            userInteractedRef.current = true;
-          }}
           onZoomChange={(newZoom) => setCurrentZoom(newZoom)}
         />
         
