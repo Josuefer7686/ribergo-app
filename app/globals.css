@@ -166,16 +166,12 @@ body.theme-light .leaflet-container {
   line-height: normal !important;
 }
 
-/* Smooth Real-time Marker Movement for Leaflet Mototaxis & User Marker */
-.leaflet-marker-pane .custom-moto-marker-interactive,
-.leaflet-marker-pane .custom-user-marker {
-  transition: transform 0.8s cubic-bezier(0.25, 0.1, 0.25, 1) !important;
-  will-change: transform;
-}
-
-.leaflet-zoom-anim .leaflet-marker-pane .custom-moto-marker-interactive,
-.leaflet-zoom-anim .leaflet-marker-pane .custom-user-marker {
-  transition: none !important;
+/* Markers stay perfectly glued to map coords during zoom and pan without lag or reverse scaling */
+.custom-moto-marker-interactive,
+.custom-user-marker,
+.custom-pickup-marker,
+.custom-dest-marker {
+  pointer-events: auto;
 }
 
 /* =========================================================================

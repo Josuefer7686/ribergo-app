@@ -1,15 +1,27 @@
 import { calculateDistanceMeters } from './geo';
 
 /**
- * In-memory LRU-like route cache to prevent unnecessary repeated requests
- * when driver/user GPS jitters by just a few meters.
+ * In-memory LRU route cache to prevent repeated requests
+ * when driver/user GPS jitters by a few meters.
  */
 const routeCache = new Map<string, { coords: [number, number][]; timestamp: number }>();
-const CACHE_TTL_MS = 8000; // 8 seconds cache for same coordinate segment
+const CACHE_TTL_MS = 10000; // 10 seconds cache for coordinate segment
+
+const ROUTING_ENDPOINTS = [
+  // 1. OpenStreetMap DE routed-bike (Ideal for mototaxis in Riberalta: navigates streets, alleys & unpaved avenues)
+  (startLng: number, startLat: number, endLng: number, endLat: number) =>
+    `https://routing.openstreetmap.de/routed-bike/route/v1/driving/${startLng},${startLat};${endLng},${endLat}?overview=full&geometries=geojson`,
+  // 2. OpenStreetMap DE routed-car
+  (startLng: number, startLat: number, endLng: number, endLat: number) =>
+    `https://routing.openstreetmap.de/routed-car/route/v1/driving/${startLng},${startLat};${endLng},${endLat}?overview=full&geometries=geojson`,
+  // 3. Global Project-OSRM fallback
+  (startLng: number, startLat: number, endLng: number, endLat: number) =>
+    `https://router.project-osrm.org/route/v1/driving/${startLng},${startLat};${endLng},${endLat}?overview=full&geometries=geojson`,
+];
 
 /**
- * Fetches turn-by-turn street route coordinates from OSRM for Riberalta, Bolivia.
- * If OSRM is slow, unreachable, or rate-limited, safely returns a fallback straight line segment.
+ * Fetches turn-by-turn street route coordinates for Riberalta, Bolivia.
+ * Guarantees that the route starts exactly at the start point and terminates exactly at the destination.
  */
 export async function fetchLiveRoute(
   startLat: number,
@@ -31,50 +43,70 @@ export async function fetchLiveRoute(
     return [[startLat, startLng], [endLat, endLng]];
   }
 
-  // 4 decimal places precision is ~11 meters, perfect for street route detection & deviation
+  // 4 decimal places precision is ~11 meters
   const cacheKey = `${startLat.toFixed(4)},${startLng.toFixed(4)}->${endLat.toFixed(4)},${endLng.toFixed(4)}`;
   const cached = routeCache.get(cacheKey);
   if (cached && Date.now() - cached.timestamp < CACHE_TTL_MS) {
     return cached.coords;
   }
 
-  try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 3500);
+  for (const buildUrl of ROUTING_ENDPOINTS) {
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 2600);
 
-    const url = `https://router.project-osrm.org/route/v1/driving/${startLng},${startLat};${endLng},${endLat}?overview=full&geometries=geojson`;
-    const response = await fetch(url, {
-      signal: controller.signal,
-      headers: { 'Accept': 'application/json' }
-    });
-    clearTimeout(timeoutId);
+      const url = buildUrl(startLng, startLat, endLng, endLat);
+      const response = await fetch(url, {
+        signal: controller.signal,
+        headers: { Accept: 'application/json' },
+      });
+      clearTimeout(timeoutId);
 
-    if (response.ok) {
-      const data = await response.json();
-      if (data.code === 'Ok' && Array.isArray(data.routes) && data.routes[0]?.geometry?.coordinates) {
-        // GeoJSON geometry.coordinates is array of [longitude, latitude]
-        // Leaflet Polyline expects array of [latitude, longitude]
-        const leafletCoords: [number, number][] = data.routes[0].geometry.coordinates.map(
-          ([lng, lat]: [number, number]) => [lat, lng]
-        );
+      if (response.ok) {
+        const data = await response.json();
+        if (data.code === 'Ok' && Array.isArray(data.routes) && data.routes[0]?.geometry?.coordinates) {
+          const rawCoords: [number, number][] = data.routes[0].geometry.coordinates;
+          if (rawCoords.length >= 2) {
+            // GeoJSON coordinates are [longitude, latitude] -> convert to Leaflet [latitude, longitude]
+            const points: [number, number][] = rawCoords.map(([lng, lat]) => [lat, lng]);
 
-        if (leafletCoords.length > 0) {
-          // Store in cache
-          routeCache.set(cacheKey, { coords: leafletCoords, timestamp: Date.now() });
+            // Ensure route starts at the exact start coordinate
+            const firstDist = calculateDistanceMeters(points[0][0], points[0][1], startLat, startLng);
+            if (firstDist > 5) {
+              points.unshift([startLat, startLng]);
+            } else {
+              points[0] = [startLat, startLng];
+            }
 
-          // Keep cache clean (max 50 entries)
-          if (routeCache.size > 50) {
-            const oldestKey = routeCache.keys().next().value;
-            if (oldestKey) routeCache.delete(oldestKey);
+            // Ensure route terminates at the exact destination coordinate
+            const lastIdx = points.length - 1;
+            const lastDist = calculateDistanceMeters(points[lastIdx][0], points[lastIdx][1], endLat, endLng);
+            if (lastDist > 5) {
+              points.push([endLat, endLng]);
+            } else {
+              points[lastIdx] = [endLat, endLng];
+            }
+
+            // Save in cache
+            routeCache.set(cacheKey, { coords: points, timestamp: Date.now() });
+            if (routeCache.size > 60) {
+              const oldest = routeCache.keys().next().value;
+              if (oldest) routeCache.delete(oldest);
+            }
+
+            return points;
           }
-
-          return leafletCoords;
         }
       }
+    } catch {
+      // Try next endpoint
     }
-  } catch (err) {
-    // Network timeout or offline - seamlessly fallback to direct line
   }
 
-  return [[startLat, startLng], [endLat, endLng]];
+  // Graceful fallback: clean direct connection between origin and destination
+  const fallbackRoute: [number, number][] = [
+    [startLat, startLng],
+    [endLat, endLng],
+  ];
+  return fallbackRoute;
 }

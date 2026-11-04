@@ -716,6 +716,28 @@ export const DriverHome = () => {
                   )}
                 </div>
 
+                {/* Distance & ETA from driver to passenger pickup */}
+                {(() => {
+                  const distToPickupMeters = (currentLocation && pendingRequest.pickup)
+                    ? calculateDistanceMeters(currentLocation.lat, currentLocation.lng, pendingRequest.pickup.lat, pendingRequest.pickup.lng)
+                    : Math.round(pendingRequest.distanceKm * 1000);
+                  const distToPickupKm = (distToPickupMeters / 1000).toFixed(1);
+                  const etaToPickupMin = Math.max(1, Math.round(distToPickupMeters / 333)); // ~20 km/h mototaxi
+                  return (
+                    <div className="flex items-center justify-between px-3 py-2 rounded-xl bg-gold-primary/10 border border-gold-primary/30 text-xs">
+                      <div className="flex items-center gap-1.5 text-gold-primary font-bold">
+                        <Navigation className="w-3.5 h-3.5 shrink-0 animate-pulse text-gold-primary" />
+                        <span>Para recoger:</span>
+                      </div>
+                      <div className="text-right font-black text-white flex items-center gap-1.5">
+                        <span className="text-gold-primary">~{etaToPickupMin} min de ti</span>
+                        <span className="text-text-secondary font-normal">•</span>
+                        <span>{distToPickupKm} km</span>
+                      </div>
+                    </div>
+                  );
+                })()}
+
                 <div className="space-y-1.5 text-xs border-t border-border-custom pt-2">
                   <p className="text-text-secondary"><span className="font-bold text-white">Recogida:</span> {pendingRequest.pickup.name}</p>
                   <p className="text-text-secondary"><span className="font-bold text-gold-primary">Destino:</span> {pendingRequest.destination.name}</p>

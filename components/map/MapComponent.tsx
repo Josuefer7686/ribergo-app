@@ -6,7 +6,7 @@ import L from 'leaflet';
 import { useAppStore } from '@/store/useAppStore';
 import { DriverData } from '@/services/mockData';
 import { apiService } from '@/services/apiService';
-import { Bike, Wrench } from 'lucide-react';
+import { Bike, Navigation } from 'lucide-react';
 import { haptics } from '@/utils/haptics';
 import { audio } from '@/utils/audio';
 import { fetchLiveRoute } from '@/utils/routing';
@@ -21,25 +21,33 @@ if (typeof window !== 'undefined') {
   });
 }
 
-function getUserIcon() {
+function getZoomScale(zoom: number): number {
+  if (zoom >= 19) return 0.65;
+  if (zoom >= 18) return 0.75;
+  if (zoom >= 17) return 0.85;
+  if (zoom >= 16) return 0.92;
+  return 1.0;
+}
+
+function getUserIcon(scale = 1.0) {
   return new L.DivIcon({
     html: `
-      <div style="position: relative; width: 26px; height: 26px; display: flex; align-items: center; justify-content: center;">
+      <div style="position: relative; width: 26px; height: 26px; display: flex; align-items: center; justify-content: center; transform: scale(${scale}); transform-origin: center center;">
         <div style="position: absolute; inset: -8px; background: rgba(244,197,66,0.35); border-radius: 50%; animation: ping 2s cubic-bezier(0,0,0.2,1) infinite;"></div>
         <div style="width: 22px; height: 22px; background: #F4C542; border: 3px solid #05080B; border-radius: 50%; box-shadow: 0 0 14px rgba(244,197,66,0.85);"></div>
       </div>
     `,
     className: 'custom-user-marker',
     iconSize: [26, 26],
-    iconAnchor: [13, 13]
+    iconAnchor: [13, 13],
   });
 }
 
-function getPassengerPickupIcon(isRescue = false) {
+function getPassengerPickupIcon(isRescue = false, scale = 1.0) {
   const color = isRescue ? '#F97316' : '#38BDF8';
   return new L.DivIcon({
     html: `
-      <div style="position: relative; width: 34px; height: 34px; display: flex; align-items: center; justify-content: center;">
+      <div style="position: relative; width: 34px; height: 34px; display: flex; align-items: center; justify-content: center; transform: scale(${scale}); transform-origin: center center;">
         <div style="position: absolute; inset: -6px; background: ${isRescue ? 'rgba(249,115,22,0.35)' : 'rgba(56,189,248,0.35)'}; border-radius: 50%; animation: ping 1.8s cubic-bezier(0,0,0.2,1) infinite;"></div>
         <div style="width: 28px; height: 28px; background: #05080B; border: 2.5px solid ${color}; border-radius: 50%; display: flex; align-items: center; justify-content: center; box-shadow: 0 0 16px ${isRescue ? 'rgba(249,115,22,0.85)' : 'rgba(56,189,248,0.85)'};">
           ${isRescue 
@@ -51,48 +59,48 @@ function getPassengerPickupIcon(isRescue = false) {
     `,
     className: 'custom-pickup-marker',
     iconSize: [34, 34],
-    iconAnchor: [17, 17]
+    iconAnchor: [17, 17],
   });
 }
 
-function getDestIcon() {
+function getDestIcon(scale = 1.0) {
   return new L.DivIcon({
     html: `
-      <div style="width: 26px; height: 26px; background: #05080B; border: 3px solid #F4C542; border-radius: 50%; display: flex; align-items: center; justify-content: center; box-shadow: 0 0 14px rgba(244,197,66,0.7);">
+      <div style="width: 26px; height: 26px; background: #05080B; border: 3px solid #F4C542; border-radius: 50%; display: flex; align-items: center; justify-content: center; box-shadow: 0 0 14px rgba(244,197,66,0.7); transform: scale(${scale}); transform-origin: center center;">
         <div style="width: 8px; height: 8px; background: #F4C542; border-radius: 50%;"></div>
       </div>
     `,
     className: 'custom-dest-marker',
     iconSize: [26, 26],
-    iconAnchor: [13, 13]
+    iconAnchor: [13, 13],
   });
 }
 
 /**
  * Creates dynamic mototaxi marker with:
- * - Directional pointer cone showing heading (si se mueve que muestre a dónde)
+ * - Directional pointer cone showing heading
  * - Rotated motorcycle icon
- * - Ambient golden pulse
- * - Clickable interaction
+ * - Ambient pulse ring
+ * - Responsive zoom scale (doesn't occlude buildings when zooming in)
  */
-function getMotoIcon(active = false, heading = 0, isMoving = false) {
+function getMotoIcon(active = false, heading = 0, isMoving = false, scale = 1.0) {
   const bgColor = active ? '#FFE885' : '#F4C542';
   const rotation = heading || 0;
   
   return new L.DivIcon({
     html: `
-      <div style="position: relative; width: 46px; height: 46px; display: flex; align-items: center; justify-content: center; cursor: pointer;">
-        <!-- Directional Pointer Arrow (Points to heading direction) -->
-        <div style="position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; transform: rotate(${rotation}deg); transition: transform 0.4s cubic-bezier(0.4, 0, 0.2, 1); pointer-events: none;">
+      <div style="position: relative; width: 46px; height: 46px; display: flex; align-items: center; justify-content: center; cursor: pointer; transform: scale(${scale}); transform-origin: center center;">
+        <!-- Directional Pointer Arrow -->
+        <div style="position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; transform: rotate(${rotation}deg); transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1); pointer-events: none;">
           <div style="position: absolute; top: -8px; width: 0; height: 0; border-left: 7px solid transparent; border-right: 7px solid transparent; border-bottom: 11px solid #F4C542; filter: drop-shadow(0 0 6px rgba(244,197,66,0.95));"></div>
         </div>
 
         <!-- Ambient Golden Pulse Ring -->
         <div style="position: absolute; inset: -4px; border-radius: 50%; background: rgba(244,197,66,0.25); ${isMoving || active ? 'animation: ping 1.8s cubic-bezier(0,0,0.2,1) infinite;' : ''} pointer-events: none;"></div>
 
-        <!-- Inner Mototaxi Bubble with smooth rotation -->
-        <div style="width: 38px; height: 38px; background: #05080B; border: 2.5px solid ${bgColor}; border-radius: 50%; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 14px rgba(0,0,0,0.85), 0 0 ${active ? '18px rgba(244,197,66,0.9)' : '10px rgba(244,197,66,0.45)'}; transform: scale(${active ? 1.15 : 1}); transition: all 0.3s cubic-bezier(0.2, 0.8, 0.2, 1); pointer-events: none;">
-          <div style="transform: rotate(${rotation}deg); transition: transform 0.4s cubic-bezier(0.4, 0, 0.2, 1); display: flex; align-items: center; justify-content: center; pointer-events: none;">
+        <!-- Inner Mototaxi Bubble -->
+        <div style="width: 38px; height: 38px; background: #05080B; border: 2.5px solid ${bgColor}; border-radius: 50%; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 14px rgba(0,0,0,0.85), 0 0 ${active ? '18px rgba(244,197,66,0.9)' : '10px rgba(244,197,66,0.45)'}; transform: scale(${active ? 1.15 : 1}); pointer-events: none;">
+          <div style="transform: rotate(${rotation}deg); transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1); display: flex; align-items: center; justify-content: center; pointer-events: none;">
             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="${bgColor}" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round">
               <circle cx="5.5" cy="17.5" r="3.5"/>
               <circle cx="18.5" cy="17.5" r="3.5"/>
@@ -108,96 +116,102 @@ function getMotoIcon(active = false, heading = 0, isMoving = false) {
     `,
     className: 'custom-moto-marker-interactive',
     iconSize: [46, 46],
-    iconAnchor: [23, 23]
+    iconAnchor: [23, 23],
   });
 }
 
-function MapClickHandler({ onMapClick }: { onMapClick: () => void }) {
+function MapInteractionTracker({ 
+  onMapClick, 
+  onUserInteraction,
+  onZoomChange 
+}: { 
+  onMapClick: () => void; 
+  onUserInteraction: () => void;
+  onZoomChange: (z: number) => void;
+}) {
   useMapEvents({
-    click: () => {
-      onMapClick();
-    },
+    click: () => onMapClick(),
+    dragstart: () => onUserInteraction(),
+    zoomstart: () => onUserInteraction(),
+    zoomend: (e) => onZoomChange(e.target.getZoom()),
   });
   return null;
 }
 
+/**
+ * MapUpdater handles framing and user-initiated centering:
+ * 1. Initial framing on startup.
+ * 2. Automatic framing ONCE when a new trip phase begins (e.g. RIDE_REQUEST or TRIP_STARTED).
+ * 3. NEVER automatically hijacks or snaps the camera back while the user is panning/zooming.
+ * 4. Recenter button explicitly flies back to user position.
+ */
 function MapUpdater({ 
   centerLat, 
   centerLng, 
-  destination,
   selectedDriverLocation,
   recenterTrigger = 0,
   routeBounds = null,
+  tripPhaseKey = '',
+  userInteractedRef,
 }: { 
   centerLat: number;
   centerLng: number;
-  destination?: [number, number] | null;
   selectedDriverLocation?: [number, number] | null;
   recenterTrigger?: number;
   routeBounds?: [[number, number], [number, number]] | null;
+  tripPhaseKey?: string;
+  userInteractedRef: React.MutableRefObject<boolean>;
 }) {
   const map = useMap();
-  const prevCenterRef = useRef<string>('');
-  const prevDestRef = useRef<string>('');
-  const prevRouteKeyRef = useRef<string>('');
   const hasInitializedRef = useRef<boolean>(false);
+  const prevTripPhaseRef = useRef<string>('');
   const isDefaultPlaza = Math.abs(centerLat - (-11.0061)) < 0.0001 && Math.abs(centerLng - (-66.0747)) < 0.0001;
-  const prevIsDefaultRef = useRef<boolean>(isDefaultPlaza);
+  const hasAcquiredRealGpsRef = useRef<boolean>(!isDefaultPlaza);
 
   // Invalidate map size once on mount
   useEffect(() => {
     const timer = setTimeout(() => {
       map.invalidateSize();
-    }, 250);
+    }, 200);
     return () => clearTimeout(timer);
   }, [map]);
 
-  // Center smoothly on initial load or when destination bounds change
+  // Initial load: center on coordinates once
   useEffect(() => {
-    const centerKey = `${centerLat.toFixed(5)},${centerLng.toFixed(5)}`;
-    const destKey = destination ? `${destination[0].toFixed(5)},${destination[1].toFixed(5)}` : '';
-
-    if (destination) {
-      if (prevDestRef.current !== destKey) {
-        prevDestRef.current = destKey;
-        const bounds = L.latLngBounds([[centerLat, centerLng], destination]);
-        map.fitBounds(bounds, { padding: [60, 60], maxZoom: 16 });
-      }
-    } else if (!hasInitializedRef.current) {
+    if (!hasInitializedRef.current) {
       hasInitializedRef.current = true;
-      prevCenterRef.current = centerKey;
       map.setView([centerLat, centerLng], 15, { animate: false });
     }
-  }, [centerLat, centerLng, destination, map]);
+  }, [centerLat, centerLng, map]);
 
-  // Fit bounds when driver is on the way to passenger or during active route
+  // First time real GPS is acquired (if app mounted before geolocation resolved)
   useEffect(() => {
-    if (routeBounds) {
-      const key = `${routeBounds[0][0].toFixed(3)},${routeBounds[0][1].toFixed(3)}_${routeBounds[1][0].toFixed(3)},${routeBounds[1][1].toFixed(3)}`;
-      if (prevRouteKeyRef.current !== key) {
-        prevRouteKeyRef.current = key;
-        const bounds = L.latLngBounds(routeBounds);
-        map.fitBounds(bounds, { padding: [70, 70], maxZoom: 16 });
-      }
-    }
-  }, [routeBounds, map]);
-
-  // If initial load was default plaza, fly to user location when real GPS is first received
-  useEffect(() => {
-    if (prevIsDefaultRef.current && !isDefaultPlaza) {
-      prevIsDefaultRef.current = false;
-      map.stop();
+    if (!hasAcquiredRealGpsRef.current && !isDefaultPlaza && !userInteractedRef.current) {
+      hasAcquiredRealGpsRef.current = true;
       try {
         map.flyTo([centerLat, centerLng], 16, { animate: true, duration: 0.8 });
       } catch {
-        map.setView([centerLat, centerLng], 16, { animate: true });
+        map.setView([centerLat, centerLng], 16);
       }
     }
-  }, [centerLat, centerLng, isDefaultPlaza, map]);
+  }, [centerLat, centerLng, isDefaultPlaza, map, userInteractedRef]);
 
-  // Recenter map immediately on custom event (0ms latency, bypasses any React state delays)
+  // Frame route ONCE when a new trip state starts (e.g., incoming ride request or trip started)
+  useEffect(() => {
+    if (tripPhaseKey && tripPhaseKey !== prevTripPhaseRef.current) {
+      prevTripPhaseRef.current = tripPhaseKey;
+      if (routeBounds) {
+        userInteractedRef.current = false;
+        map.stop();
+        map.fitBounds(routeBounds, { padding: [70, 70], maxZoom: 16 });
+      }
+    }
+  }, [tripPhaseKey, routeBounds, map, userInteractedRef]);
+
+  // Recenter map immediately on custom event (fired by "Mi Ubicación" button)
   useEffect(() => {
     const handleRecenter = (e?: any) => {
+      userInteractedRef.current = false;
       const state = useAppStore.getState();
       const targetLat = e?.detail?.lat ?? state.currentLocation?.lat ?? -11.0061;
       const targetLng = e?.detail?.lng ?? state.currentLocation?.lng ?? -66.0747;
@@ -213,11 +227,12 @@ function MapUpdater({
 
     window.addEventListener('ribergo:recenter_map', handleRecenter);
     return () => window.removeEventListener('ribergo:recenter_map', handleRecenter);
-  }, [map]);
+  }, [map, userInteractedRef]);
 
-  // Smoothly fly to user location whenever recenterTrigger changes
+  // Fly to user location when recenterTrigger prop increments
   useEffect(() => {
     if (recenterTrigger > 0) {
+      userInteractedRef.current = false;
       const state = useAppStore.getState();
       const targetLat = state.currentLocation?.lat ?? centerLat;
       const targetLng = state.currentLocation?.lng ?? centerLng;
@@ -229,7 +244,7 @@ function MapUpdater({
         map.setView([targetLat, targetLng], 16, { animate: true });
       }
     }
-  }, [recenterTrigger, map, centerLat, centerLng]);
+  }, [recenterTrigger, map, centerLat, centerLng, userInteractedRef]);
 
   // Smoothly pan towards selected driver if tapped
   useEffect(() => {
@@ -247,14 +262,15 @@ export default function MapComponent() {
     currentLocation, destination, role, passengerState, driverState, 
     assignedDriver, onlineDrivers, setOnlineDrivers,
     selectedDriverId, setSelectedDriverId,
-    mapRecenterTrigger, activeTrip, urbanServiceType
+    mapRecenterTrigger, activeTrip, urbanServiceType,
+    pendingRequest
   } = useAppStore();
 
-  // Check if destination is "Acordar en persona"
-  const isInPersonDestination = !destination || (destination as any).id === 'in-person' || destination.name?.toLowerCase().includes('acordar');
+  const [currentZoom, setCurrentZoom] = useState<number>(15);
+  const userInteractedRef = useRef<boolean>(false);
 
   // Service type: MOTOTAXI or REMOLCADA / AUXILIO
-  const serviceType = activeTrip?.serviceType || urbanServiceType || 'MOTOTAXI';
+  const serviceType = activeTrip?.serviceType || pendingRequest?.serviceType || urbanServiceType || 'MOTOTAXI';
   const isRescue = serviceType === 'REMOLCADA';
 
   // Subscribe to real-time online drivers from Hybrid SyncBus & Firestore
@@ -265,15 +281,14 @@ export default function MapComponent() {
     return () => unsubscribe();
   }, [setOnlineDrivers]);
 
-  // Only real online drivers (100% real, no bots/mocks)
+  // Real online drivers list
   const activeDriversList: DriverData[] = onlineDrivers;
 
-  // Real assigned driver live location lookup from onlineDrivers
+  // Real assigned driver lookup
   const liveAssignedDriver = activeDriversList.find((d) => d.id === assignedDriver?.id) || assignedDriver;
 
-  // Selected driver coordinate for smooth auto-centering
+  // Selected driver coordinate for map pan
   const selectedDriver = activeDriversList.find((d) => d.id === selectedDriverId) || null;
-
   const selectedDriverLocation: [number, number] | null = selectedDriver?.currentLocation 
     ? [selectedDriver.currentLocation.lat, selectedDriver.currentLocation.lng] 
     : null;
@@ -282,51 +297,55 @@ export default function MapComponent() {
   const centerLng = currentLocation ? currentLocation.lng : -66.0747;
   const center = useMemo<[number, number]>(() => [centerLat, centerLng], [centerLat, centerLng]); 
 
-  // Destination coordinates if NOT in-person
-  const destPoint: [number, number] | null = (destination && !isInPersonDestination)
-    ? [destination.lat, destination.lng]
-    : null;
-
-  // Determine active dynamic route endpoints
+  // =========================================================================
+  // DYNAMIC ROUTE DETERMINATION
+  // =========================================================================
   let routeOrigin: [number, number] | null = null;
   let routeTarget: [number, number] | null = null;
+  let tripPhaseKey = '';
 
   if (role === 'PASSENGER') {
-    if (passengerState === 'DRIVER_FOUND' || passengerState === 'NEGOTIATING') {
-      // Driver is on the way to meet passenger!
-      if (liveAssignedDriver?.currentLocation && (currentLocation || activeTrip?.pickup)) {
-        routeOrigin = [liveAssignedDriver.currentLocation.lat, liveAssignedDriver.currentLocation.lng];
-        routeTarget = currentLocation 
-          ? [currentLocation.lat, currentLocation.lng] 
-          : [activeTrip!.pickup.lat, activeTrip!.pickup.lng];
-      }
-    } else if (passengerState === 'TRIP_STARTED') {
-      // Trip started, moving towards destination
-      if (destPoint && !isInPersonDestination) {
-        if (liveAssignedDriver?.currentLocation) {
-          routeOrigin = [liveAssignedDriver.currentLocation.lat, liveAssignedDriver.currentLocation.lng];
-        } else if (currentLocation) {
-          routeOrigin = [currentLocation.lat, currentLocation.lng];
-        }
-        routeTarget = destPoint;
-      }
-    } else if (passengerState === 'CONFIRMING' && currentLocation && destPoint && !isInPersonDestination) {
+    if (passengerState === 'CONFIRMING' && currentLocation && destination?.lat && destination?.lng) {
       // Pre-booking route preview
       routeOrigin = [currentLocation.lat, currentLocation.lng];
-      routeTarget = destPoint;
+      routeTarget = [destination.lat, destination.lng];
+      tripPhaseKey = `passenger_confirming_${destination.lat}_${destination.lng}`;
+    } else if ((passengerState === 'DRIVER_FOUND' || passengerState === 'NEGOTIATING') && liveAssignedDriver?.currentLocation) {
+      // Assigned driver is heading to passenger's pickup spot
+      routeOrigin = [liveAssignedDriver.currentLocation.lat, liveAssignedDriver.currentLocation.lng];
+      routeTarget = currentLocation 
+        ? [currentLocation.lat, currentLocation.lng] 
+        : (activeTrip?.pickup ? [activeTrip.pickup.lat, activeTrip.pickup.lng] : null);
+      tripPhaseKey = `passenger_driver_coming_${activeTrip?.id || ''}`;
+    } else if (passengerState === 'TRIP_STARTED') {
+      // Passenger picked up! Route towards destination
+      const dest = activeTrip?.destination || destination;
+      if (dest?.lat && dest?.lng) {
+        routeOrigin = liveAssignedDriver?.currentLocation 
+          ? [liveAssignedDriver.currentLocation.lat, liveAssignedDriver.currentLocation.lng]
+          : (currentLocation ? [currentLocation.lat, currentLocation.lng] : null);
+        routeTarget = [dest.lat, dest.lng];
+        tripPhaseKey = `passenger_trip_started_${activeTrip?.id || ''}`;
+      }
     }
   } else if (role === 'DRIVER') {
-    if ((driverState === 'GOING_TO_PASSENGER' || activeTrip?.status === 'GOING_TO_PASSENGER' || activeTrip?.status === 'NEGOTIATING') && activeTrip?.pickup && currentLocation) {
-      // Driver is navigating to passenger's pickup location!
+    if (driverState === 'RIDE_REQUEST' && pendingRequest?.pickup && currentLocation) {
+      // 🌟 DRIVER SEES INCOMING TRIP: Trace route from driver's GPS to passenger pickup!
+      routeOrigin = [currentLocation.lat, currentLocation.lng];
+      routeTarget = [pendingRequest.pickup.lat, pendingRequest.pickup.lng];
+      tripPhaseKey = `driver_request_${pendingRequest.id}`;
+    } else if ((driverState === 'GOING_TO_PASSENGER' || activeTrip?.status === 'GOING_TO_PASSENGER' || activeTrip?.status === 'NEGOTIATING') && activeTrip?.pickup && currentLocation) {
+      // Driver accepted and is navigating to passenger's pickup location
       routeOrigin = [currentLocation.lat, currentLocation.lng];
       routeTarget = [activeTrip.pickup.lat, activeTrip.pickup.lng];
-    } else if (driverState === 'TRIP_STARTED' && activeTrip && currentLocation) {
-      // Driver is moving passenger to destination
-      const tripDest = activeTrip.destination;
-      const isTripDestInPerson = !tripDest || (tripDest as any).id === 'in-person' || tripDest.name?.toLowerCase().includes('acordar');
-      if (tripDest && !isTripDestInPerson) {
+      tripPhaseKey = `driver_going_to_pickup_${activeTrip.id}`;
+    } else if (driverState === 'TRIP_STARTED' && currentLocation) {
+      // 🌟 TRIP STARTED: Driver picked up passenger, route stays visible all the way to destination!
+      const tripDest = activeTrip?.destination || destination;
+      if (tripDest?.lat && tripDest?.lng) {
         routeOrigin = [currentLocation.lat, currentLocation.lng];
         routeTarget = [tripDest.lat, tripDest.lng];
+        tripPhaseKey = `driver_trip_started_${activeTrip?.id || ''}`;
       }
     }
   }
@@ -370,15 +389,20 @@ export default function MapComponent() {
     };
   }, [originKey, targetKey, routeOrigin, routeTarget]);
 
-  // Route bounds for auto-framing on initial encounter
+  // Route bounds for auto-framing on initial transition
   const routeBounds: [[number, number], [number, number]] | null = 
     (routeOrigin && routeTarget) ? [routeOrigin, routeTarget] : null;
+
+  // Dynamic zoom scale factor for markers
+  const markerScale = getZoomScale(currentZoom);
 
   return (
     <div className="w-full h-full absolute inset-0 z-0 overflow-hidden">
       <MapContainer 
         center={center} 
         zoom={15} 
+        minZoom={12}
+        maxZoom={19}
         scrollWheelZoom={true} 
         zoomControl={false}
         className="w-full h-full"
@@ -386,22 +410,39 @@ export default function MapComponent() {
         <TileLayer
           attribution='&copy; OpenStreetMap'
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+          maxZoom={19}
+          maxNativeZoom={19}
         />
         <MapUpdater 
           centerLat={centerLat} 
           centerLng={centerLng} 
-          destination={routeTarget && !isInPersonDestination ? routeTarget : destPoint} 
           selectedDriverLocation={selectedDriverLocation}
           recenterTrigger={mapRecenterTrigger}
           routeBounds={routeBounds}
+          tripPhaseKey={tripPhaseKey}
+          userInteractedRef={userInteractedRef}
         />
-        <MapClickHandler onMapClick={() => setSelectedDriverId(null)} />
+        <MapInteractionTracker 
+          onMapClick={() => setSelectedDriverId(null)} 
+          onUserInteraction={() => {
+            userInteractedRef.current = true;
+          }}
+          onZoomChange={(newZoom) => setCurrentZoom(newZoom)}
+        />
         
         {/* User / Driver Live Location */}
         {currentLocation && (
           <Marker 
             position={[currentLocation.lat, currentLocation.lng]} 
-            icon={role === 'DRIVER' ? getMotoIcon(true, currentLocation.heading || 0, true) : getUserIcon()} 
+            icon={role === 'DRIVER' ? getMotoIcon(true, currentLocation.heading || 0, true, markerScale) : getUserIcon(markerScale)} 
+          />
+        )}
+
+        {/* Incoming Trip Request Pickup Marker for Driver */}
+        {role === 'DRIVER' && driverState === 'RIDE_REQUEST' && pendingRequest?.pickup && (
+          <Marker 
+            position={[pendingRequest.pickup.lat, pendingRequest.pickup.lng]} 
+            icon={getPassengerPickupIcon(pendingRequest.serviceType === 'REMOLCADA', markerScale)} 
           />
         )}
 
@@ -409,13 +450,17 @@ export default function MapComponent() {
         {role === 'DRIVER' && (driverState === 'GOING_TO_PASSENGER' || activeTrip?.status === 'GOING_TO_PASSENGER' || activeTrip?.status === 'NEGOTIATING') && activeTrip?.pickup && (
           <Marker 
             position={[activeTrip.pickup.lat, activeTrip.pickup.lng]} 
-            icon={getPassengerPickupIcon(isRescue)} 
+            icon={getPassengerPickupIcon(isRescue, markerScale)} 
           />
         )}
         
-        {/* Destination Location - ONLY if specified and NOT in-person */}
-        {destPoint && !isInPersonDestination && (
-          <Marker position={destPoint} icon={getDestIcon()} />
+        {/* Destination Location Marker */}
+        {((role === 'PASSENGER' && destination?.lat && destination?.lng) || 
+          (routeTarget && (passengerState === 'TRIP_STARTED' || driverState === 'TRIP_STARTED'))) && (
+          <Marker 
+            position={routeTarget || [destination!.lat, destination!.lng]} 
+            icon={getDestIcon(markerScale)} 
+          />
         )}
 
         {/* 🌟 LUXURY ANIMATED STREET ROUTE (TURN-BY-TURN & DEVIATION AWARE) */}
@@ -426,7 +471,7 @@ export default function MapComponent() {
               positions={liveRoutePoints}
               pathOptions={{
                 color: isRescue ? '#F97316' : '#F4C542',
-                weight: 11,
+                weight: 10,
                 opacity: 0.38,
                 lineCap: 'round',
                 lineJoin: 'round',
@@ -439,7 +484,7 @@ export default function MapComponent() {
               positions={liveRoutePoints}
               pathOptions={{
                 color: isRescue ? '#EA580C' : '#F4C542',
-                weight: 5.5,
+                weight: 5,
                 opacity: 0.88,
                 lineCap: 'round',
                 lineJoin: 'round'
@@ -451,7 +496,7 @@ export default function MapComponent() {
               positions={liveRoutePoints}
               pathOptions={{
                 color: isRescue ? '#FFF7ED' : '#FFFFFF',
-                weight: 3.2,
+                weight: 2.8,
                 opacity: 0.95,
                 lineCap: 'round',
                 lineJoin: 'round',
@@ -466,7 +511,7 @@ export default function MapComponent() {
           <Marker 
             key={liveAssignedDriver.id || 'assigned_driver'} 
             position={[liveAssignedDriver.currentLocation.lat, liveAssignedDriver.currentLocation.lng]} 
-            icon={getMotoIcon(true, liveAssignedDriver.heading || 0, (liveAssignedDriver.speed || 0) > 0)} 
+            icon={getMotoIcon(true, liveAssignedDriver.heading || 0, (liveAssignedDriver.speed || 0) > 0, markerScale)} 
           />
         )}
         
@@ -490,7 +535,7 @@ export default function MapComponent() {
                   <Marker 
                     key={driver.id} 
                     position={[driver.currentLocation.lat, driver.currentLocation.lng]} 
-                    icon={getMotoIcon(isSelected || isAssigned, heading, isMoving)}
+                    icon={getMotoIcon(isSelected || isAssigned, heading, isMoving, markerScale)}
                     eventHandlers={{
                       click: (e) => {
                         L.DomEvent.stopPropagation(e as any);
