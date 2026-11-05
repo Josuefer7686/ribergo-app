@@ -2,7 +2,7 @@ import {
   ActiveTripInfo, LocationPoint, UserProfile, UserRole, ServiceType,
   TerminalDeparture, TerminalBooking, TerminalExpreso, TerminalEncomienda 
 } from '@/store/useAppStore';
-import { DriverData } from './mockData';
+import { DriverData, VehicleType } from './mockData';
 import { db, auth, isFirebaseConfigured } from '@/lib/firebase';
 import { 
   collection, doc, setDoc, getDoc, getDocs, addDoc, updateDoc, onSnapshot, query, where, orderBy, serverTimestamp 
@@ -54,6 +54,7 @@ export interface DriverBox {
   driverId: string;
   driverName?: string;
   driverPhone?: string;
+  vehicleType?: VehicleType;
   motorcycle?: string;
   plate?: string;
   totalIncome: number;
@@ -714,7 +715,8 @@ export const apiService = {
     heading: number = 0,
     speed: number = 0,
     trips: number = 0,
-    avatar: string = ''
+    avatar: string = '',
+    vehicleType: VehicleType = 'MOTOTAXI'
   ) {
     let realName = driverName;
     let realPhone = phone;
@@ -723,6 +725,7 @@ export const apiService = {
     let realRating: number | null = rating;
     let realTrips = trips;
     let realAvatar = avatar;
+    let realVehicleType: VehicleType = vehicleType || 'MOTOTAXI';
 
     // Obtener datos del casillero único del conductor para reflejar calificación real
     if (driverId) {
@@ -731,6 +734,7 @@ export const apiService = {
         realRating = box.rating;
         realTrips = box.totalTrips;
         if (box.driverName) realName = box.driverName;
+        if (box.vehicleType) realVehicleType = box.vehicleType;
         if (box.motorcycle) realMotorcycle = box.motorcycle;
         if (box.plate) realPlate = box.plate;
       } catch (e) {}
@@ -744,6 +748,7 @@ export const apiService = {
           const uData = userDoc.data();
           if (uData.name) realName = uData.name;
           if (uData.phone) realPhone = uData.phone;
+          if (uData.vehicleType) realVehicleType = uData.vehicleType;
           if (uData.motorcycle) realMotorcycle = uData.motorcycle;
           if (uData.plate) realPlate = uData.plate;
           if (typeof uData.rating === 'number' || uData.rating === null) realRating = uData.rating;
@@ -762,6 +767,7 @@ export const apiService = {
       rating: realRating,
       trips: realTrips,
       avatar: realAvatar,
+      vehicleType: realVehicleType,
       motorcycle: realMotorcycle,
       plate: realPlate,
       currentLocation: location,
@@ -844,6 +850,7 @@ export const apiService = {
                 rating: typeof data.rating === 'number' ? data.rating : null,
                 trips: typeof data.trips === 'number' ? data.trips : 0,
                 avatar: data.avatar || '',
+                vehicleType: (data.vehicleType as VehicleType) || 'MOTOTAXI',
                 motorcycle: data.motorcycle || '',
                 plate: data.plate || '',
                 currentLocation: data.currentLocation || { lat: -11.0061, lng: -66.0747 },
@@ -1328,7 +1335,7 @@ export const apiService = {
   /**
    * Listen to pending ride requests for online drivers (Hybrid RealtimeSyncBus + Firestore 'rides' collection)
    */
-  subscribeToPendingRides(callback: (rides: any[]) => void) {
+  subscribeToPendingRides(callback: (rides: any[]) => void, driverVehicleType?: VehicleType) {
     let lastFirestoreRides: any[] = [];
 
     const notifyCombined = () => {
@@ -1357,6 +1364,20 @@ export const apiService = {
         const timeVal = r.createdAtMs || (typeof r.createdAt?.toMillis === 'function' ? r.createdAt.toMillis() : (r.createdAt?.seconds ? r.createdAt.seconds * 1000 : 0));
         const age = now - (timeVal || 0);
         if (timeVal && age > 20 * 60 * 1000) return false;
+
+        // Filtrado por categoría de vehículo del conductor si se especificó
+        if (driverVehicleType) {
+          const reqService = (r.serviceType as ServiceType) || 'MOTOTAXI';
+          if (driverVehicleType === 'MOTOCAR') {
+            if (reqService !== 'MOTOCAR' && reqService !== 'REMOLCADA') return false;
+          } else if (driverVehicleType === 'TAXI_AUTO') {
+            if (reqService !== 'TAXI_AUTO') return false;
+          } else {
+            // MOTOTAXI
+            if (reqService !== 'MOTOTAXI' && reqService !== 'REMOLCADA') return false;
+          }
+        }
+
         return true;
       }).sort((a, b) => {
         const timeA = a.createdAtMs || (typeof a.createdAt?.toMillis === 'function' ? a.createdAt.toMillis() : (a.createdAt?.seconds ? a.createdAt.seconds * 1000 : 0));
@@ -1415,6 +1436,7 @@ export const apiService = {
       driverName: driver.name,
       driverPhone: driver.phone,
       driverRating: driver.rating,
+      vehicleType: driver.vehicleType || 'MOTOTAXI',
       motorcycle: driver.motorcycle,
       plate: driver.plate,
       acceptedAtMs: Date.now(),
@@ -1432,6 +1454,7 @@ export const apiService = {
           driverName: driver.name,
           driverPhone: driver.phone,
           driverRating: driver.rating,
+          vehicleType: driver.vehicleType || 'MOTOTAXI',
           motorcycle: driver.motorcycle,
           plate: driver.plate,
           acceptedAt: serverTimestamp(),
@@ -1442,6 +1465,50 @@ export const apiService = {
         ]);
       } catch (err) {
         console.warn('Firestore Accept Ride Error:', err);
+      }
+    }
+  },
+
+  /**
+   * Actualizar vehículo del conductor (categoría, modelo y placa)
+   */
+  async updateDriverVehicle(driverId: string, vehicleType: VehicleType, motorcycle: string, plate: string) {
+    if (!driverId) return;
+
+    // Actualizar casillero local
+    const box = await this.getDriverBox(driverId);
+    box.vehicleType = vehicleType;
+    box.motorcycle = motorcycle;
+    box.plate = plate;
+    box.updatedAtMs = Date.now();
+    if (typeof window !== 'undefined') {
+      try {
+        localStorage.setItem(`ribergo_driver_box_${driverId}`, JSON.stringify(box));
+      } catch (e) {}
+    }
+
+    if (isFirebaseConfigured()) {
+      try {
+        await Promise.all([
+          updateDoc(doc(db, 'users', driverId), {
+            vehicleType,
+            motorcycle,
+            plate,
+          }).catch(() => {}),
+          setDoc(doc(db, 'driver_boxes', driverId), {
+            vehicleType,
+            motorcycle,
+            plate,
+            updatedAt: serverTimestamp(),
+          }, { merge: true }).catch(() => {}),
+          updateDoc(doc(db, 'online_drivers', driverId), {
+            vehicleType,
+            motorcycle,
+            plate,
+          }).catch(() => {}),
+        ]);
+      } catch (err) {
+        console.warn('Error updating driver vehicle in Firestore:', err);
       }
     }
   },

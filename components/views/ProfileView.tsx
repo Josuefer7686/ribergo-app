@@ -12,10 +12,12 @@ import { haptics } from '@/utils/haptics';
 import { audio } from '@/utils/audio';
 import { notifications } from '@/utils/notifications';
 import { usePwa } from '@/utils/pwa';
+import { DriverVehicleModal } from '@/components/modals/DriverVehicleModal';
 
 export const ProfileView = () => {
   const { user, role, setRole, setCurrentView, logout, preferences, setPaymentMethod, toggleNotification, toggleSetting, setShowPwaModal } = useAppStore();
   const [notifPermission, setNotifPermission] = useState<string>(() => notifications.getPermission());
+  const [showVehicleModal, setShowVehicleModal] = useState(false);
   const { isStandalone } = usePwa();
 
   const isPassenger = role === 'PASSENGER';
@@ -96,6 +98,49 @@ export const ProfileView = () => {
             Cambiar
           </button>
         </div>
+
+        {/* DRIVER VEHICLE MANAGEMENT CARD (SOLO PARA CONDUCTORES) */}
+        {!isPassenger && (
+          <div className="p-4 rounded-2xl bg-surface border border-gold-primary/40 flex items-center justify-between shadow-lg">
+            <div className="flex items-center gap-3">
+              <div className="w-11 h-11 rounded-xl bg-[#05080B] border border-gold-primary/40 flex items-center justify-center p-2 text-gold-primary shrink-0 shadow-md">
+                <img 
+                  src={
+                    user?.vehicleType === 'MOTOCAR' 
+                      ? '/icons/motocar_gold.png' 
+                      : user?.vehicleType === 'TAXI_AUTO' 
+                      ? '/icons/taxi_auto_gold.png' 
+                      : '/icons/mototaxi_gold.png'
+                  } 
+                  alt="Vehículo" 
+                  className="w-full h-full object-contain" 
+                />
+              </div>
+              <div>
+                <p className="text-xs font-bold text-white">
+                  {user?.vehicleType === 'MOTOCAR' 
+                    ? 'Motocar de Carga' 
+                    : user?.vehicleType === 'TAXI_AUTO' 
+                    ? 'Taxi en Automóvil' 
+                    : 'Mototaxi Normal'}
+                </p>
+                <p className="text-[10px] text-text-secondary">
+                  {user?.motorcycle || 'Estándar'} • Placa: {user?.plate || 'Sin placa'}
+                </p>
+              </div>
+            </div>
+
+            <button
+              onClick={() => {
+                haptics.impact();
+                setShowVehicleModal(true);
+              }}
+              className="px-3 py-1.5 rounded-xl bg-gold-primary text-background font-black text-xs hover:bg-gold-light transition shadow-md shadow-gold-primary/20 active:scale-95 whitespace-nowrap"
+            >
+              Configurar
+            </button>
+          </div>
+        )}
 
         {/* DRIVER REGISTRATION / SECURITY INFO BANNER (SOLO PARA PASAJEROS) */}
         {isPassenger && (
@@ -620,6 +665,11 @@ export const ProfileView = () => {
         </div>
       </IosModal>
 
+      {/* DRIVER VEHICLE CONFIGURATION MODAL */}
+      <DriverVehicleModal
+        isOpen={showVehicleModal}
+        onClose={() => setShowVehicleModal(false)}
+      />
     </div>
   );
 };

@@ -15,6 +15,8 @@ import { apiService, realtimeSyncBus } from '@/services/apiService';
 import { DriverWalletTutorialModal } from '@/components/modals/DriverWalletTutorialModal';
 import { QrTopupModal } from '@/components/modals/QrTopupModal';
 import { NegotiationChatModal } from '@/components/modals/NegotiationChatModal';
+import { DriverVehicleModal } from '@/components/modals/DriverVehicleModal';
+import { VehicleType } from '@/services/mockData';
 
 export const DriverHome = () => {
   const { 
@@ -32,6 +34,7 @@ export const DriverHome = () => {
     return Boolean(user?.role === 'DRIVER' && !user?.hasCompletedDriverTutorial);
   });
   const [showQrModal, setShowQrModal] = useState(false);
+  const [showVehicleModal, setShowVehicleModal] = useState(false);
   const [lowBalanceBanner, setLowBalanceBanner] = useState(false);
 
   const lastLocationRef = useRef<LocationPoint | null>(currentLocation);
@@ -154,15 +157,17 @@ export const DriverHome = () => {
       setDriverState('ONLINE');
 
       const loc = await getAccurateLocation();
+      const currentVehicleType: VehicleType = user?.vehicleType || 'MOTOTAXI';
       await apiService.setDriverOnlineStatus(
-        driverId, driverName, driverPhone, motorcycle, plate, rating, loc, true, 0, 0, trips, avatar
+        driverId, driverName, driverPhone, motorcycle, plate, rating, loc, true, 0, 0, trips, avatar, currentVehicleType
       );
     } else {
       setDriverState('OFFLINE');
       setPendingRequest(null);
       const loc = currentLocation || { lat: -11.0061, lng: -66.0747, name: 'Riberalta Centro' };
+      const currentVehicleType: VehicleType = user?.vehicleType || 'MOTOTAXI';
       await apiService.setDriverOnlineStatus(
-        driverId, driverName, driverPhone, motorcycle, plate, rating, loc, false, 0, 0, trips, avatar
+        driverId, driverName, driverPhone, motorcycle, plate, rating, loc, false, 0, 0, trips, avatar, currentVehicleType
       );
     }
   };
@@ -264,6 +269,7 @@ export const DriverHome = () => {
       return;
     }
 
+    const driverVehicleType: VehicleType = user?.vehicleType || 'MOTOTAXI';
     const unsubscribe = apiService.subscribeToPendingRides((pendingRides) => {
       // Filtrar solicitudes que este chofer específico ya rechazó
       let rejected: string[] = [];
@@ -320,6 +326,7 @@ export const DriverHome = () => {
           passengerName: req.passengerName || 'Pasajero RiberGO',
           passengerPhone: req.passengerPhone || '+591 70000000',
           passengerRating: 5.0,
+          serviceType: req.serviceType || 'MOTOTAXI',
           paymentMethod: req.paymentMethod || 'CASH',
           paymentStatus: req.paymentStatus || 'PENDING',
         });
@@ -328,10 +335,10 @@ export const DriverHome = () => {
         setDriverState('RIDE_REQUEST');
         setCountdown(15);
       }
-    });
+    }, driverVehicleType);
 
     return () => unsubscribe();
-  }, [isOnline, rejectedRideIds, setPendingRequest, setDriverState]);
+  }, [isOnline, rejectedRideIds, user?.vehicleType, setPendingRequest, setDriverState]);
 
   // Request countdown timer with sound & haptic alerts
   useEffect(() => {
@@ -534,6 +541,31 @@ export const DriverHome = () => {
           </div>
 
           <div className="flex items-center gap-2">
+            {/* Driver Vehicle Switcher Pill */}
+            <button
+              onClick={() => {
+                haptics.selection();
+                setShowVehicleModal(true);
+              }}
+              className="px-2.5 py-1.5 rounded-2xl bg-surface/90 border border-gold-primary/40 text-gold-primary backdrop-blur-md text-xs font-bold flex items-center gap-1.5 shadow-lg active:scale-95 hover:border-gold-primary"
+              title="Configurar mi vehículo"
+            >
+              <img 
+                src={
+                  user?.vehicleType === 'MOTOCAR' 
+                    ? '/icons/motocar_gold.png' 
+                    : user?.vehicleType === 'TAXI_AUTO' 
+                    ? '/icons/taxi_auto_gold.png' 
+                    : '/icons/mototaxi_gold.png'
+                } 
+                alt="Vehículo" 
+                className="w-4 h-4 object-contain" 
+              />
+              <span className="max-w-[75px] truncate text-[11px] font-extrabold">
+                {user?.vehicleType === 'MOTOCAR' ? 'Motocar' : user?.vehicleType === 'TAXI_AUTO' ? 'Taxi Auto' : 'Mototaxi'}
+              </span>
+            </button>
+
             {/* Free Trips Gift Badge */}
             {freeTrips > 0 && (
               <div className="px-2.5 py-1.5 rounded-2xl bg-gradient-to-r from-amber-500/20 to-yellow-500/20 border border-gold-primary text-gold-primary backdrop-blur-md text-xs font-black flex items-center gap-1 shadow-lg animate-pulse">
@@ -623,9 +655,26 @@ export const DriverHome = () => {
                     ? `¡Tienes ${freeTrips} viajes gratis de bienvenida sin comisión!`
                     : walletBalance <= 0 
                     ? 'Recarga tu saldo para volver a conectarte.' 
-                    : 'Conéctate para recibir solicitudes de mototaxi en Riberalta.'}
+                    : `Conéctate para recibir solicitudes de ${user?.vehicleType === 'MOTOCAR' ? 'motocar de carga' : user?.vehicleType === 'TAXI_AUTO' ? 'taxi auto' : 'mototaxi'} en Riberalta.`}
                 </p>
               </div>
+
+              {/* Botón rápido para configurar vehículo */}
+              <div className="flex items-center justify-center gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => setShowVehicleModal(true)}
+                  className="px-3 py-1.5 rounded-xl bg-surface-2 border border-border-custom hover:border-gold-primary/50 text-[11px] font-bold text-gold-primary flex items-center gap-1.5 transition active:scale-95"
+                >
+                  <img 
+                    src={user?.vehicleType === 'MOTOCAR' ? '/icons/motocar_gold.png' : user?.vehicleType === 'TAXI_AUTO' ? '/icons/taxi_auto_gold.png' : '/icons/mototaxi_gold.png'} 
+                    alt="Vehículo" 
+                    className="w-3.5 h-3.5 object-contain" 
+                  />
+                  <span>Mi Vehículo: {user?.vehicleType === 'MOTOCAR' ? 'Motocar' : user?.vehicleType === 'TAXI_AUTO' ? 'Taxi Auto' : 'Mototaxi'}</span>
+                </button>
+              </div>
+
               <button
                 onClick={toggleOnline}
                 className="w-full py-3.5 bg-gold-primary hover:bg-gold-light text-background rounded-2xl font-black text-sm shadow-xl shadow-gold-primary/20 transition active:scale-95"
@@ -644,14 +693,38 @@ export const DriverHome = () => {
               exit={{ y: 50, opacity: 0 }}
               className="p-5 rounded-3xl bg-surface/95 border border-border-custom backdrop-blur-xl shadow-2xl space-y-3"
             >
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-gold-primary/10 border border-gold-primary/30 flex items-center justify-center text-gold-primary">
-                  <Bike className="w-5 h-5 animate-pulse" />
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-gold-primary/10 border border-gold-primary/30 flex items-center justify-center p-2 text-gold-primary">
+                    <img 
+                      src={
+                        user?.vehicleType === 'MOTOCAR' 
+                          ? '/icons/motocar_gold.png' 
+                          : user?.vehicleType === 'TAXI_AUTO' 
+                          ? '/icons/taxi_auto_gold.png' 
+                          : '/icons/mototaxi_gold.png'
+                      } 
+                      alt="Vehículo" 
+                      className="w-full h-full object-contain animate-pulse" 
+                    />
+                  </div>
+                  <div>
+                    <h3 className="text-xs font-bold text-gold-primary uppercase tracking-wider">
+                      {user?.vehicleType === 'MOTOCAR' ? 'Buscando cargas / fletes...' : user?.vehicleType === 'TAXI_AUTO' ? 'Buscando viajes en auto...' : 'Buscando pasajeros...'}
+                    </h3>
+                    <p className="text-xs text-text-secondary">
+                      Conectado como {user?.vehicleType === 'MOTOCAR' ? 'Motocar' : user?.vehicleType === 'TAXI_AUTO' ? 'Taxi Auto' : 'Mototaxi'} ({user?.motorcycle || 'Estándar'}).
+                    </p>
+                  </div>
                 </div>
-                <div>
-                  <h3 className="text-xs font-bold text-gold-primary uppercase tracking-wider">Buscando viajes...</h3>
-                  <p className="text-xs text-text-secondary">Conectado y listo para recibir pasajeros.</p>
-                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setShowVehicleModal(true)}
+                  className="px-2.5 py-1.5 rounded-xl bg-surface-2 border border-border-custom text-[11px] font-bold text-gold-primary hover:text-white transition active:scale-95"
+                >
+                  Cambiar
+                </button>
               </div>
             </motion.div>
           )}
@@ -685,6 +758,16 @@ export const DriverHome = () => {
                       <Wrench className="w-3 h-3 text-amber-400" />
                       Auxilio / Remolcada
                     </span>
+                  ) : pendingRequest.serviceType === 'MOTOCAR' ? (
+                    <span className="block text-[9px] font-black text-gold-primary uppercase tracking-wider flex items-center justify-end gap-1">
+                      <img src="/icons/motocar_gold.png" alt="Motocar" className="w-3.5 h-3.5 object-contain" />
+                      Carga & Flete
+                    </span>
+                  ) : pendingRequest.serviceType === 'TAXI_AUTO' ? (
+                    <span className="block text-[9px] font-black text-gold-primary uppercase tracking-wider flex items-center justify-end gap-1">
+                      <img src="/icons/taxi_auto_gold.png" alt="Auto" className="w-3.5 h-3.5 object-contain" />
+                      Taxi Auto
+                    </span>
                   ) : pendingRequest.price > 10 ? (
                     <span className="block text-[9px] font-black text-amber-400 uppercase tracking-wider">
                       ⚡ ¡Oferta atractiva!
@@ -697,23 +780,39 @@ export const DriverHome = () => {
               <div className="p-3.5 rounded-2xl bg-surface-2 border border-border-custom space-y-3">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3">
-                    <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${
+                    <div className={`w-10 h-10 rounded-xl flex items-center justify-center p-2 ${
                       pendingRequest.serviceType === 'REMOLCADA'
                         ? 'bg-amber-500/20 border border-amber-500/40 text-amber-400'
                         : 'bg-gold-primary/20 border border-gold-primary/40 text-gold-primary'
                     }`}>
-                      {pendingRequest.serviceType === 'REMOLCADA' ? <Wrench className="w-5 h-5 animate-pulse" /> : <User className="w-5 h-5" />}
+                      {pendingRequest.serviceType === 'REMOLCADA' ? (
+                        <Wrench className="w-5 h-5 animate-pulse" />
+                      ) : pendingRequest.serviceType === 'MOTOCAR' ? (
+                        <img src="/icons/motocar_gold.png" alt="Motocar" className="w-full h-full object-contain" />
+                      ) : pendingRequest.serviceType === 'TAXI_AUTO' ? (
+                        <img src="/icons/taxi_auto_gold.png" alt="Auto" className="w-full h-full object-contain" />
+                      ) : (
+                        <User className="w-5 h-5" />
+                      )}
                     </div>
                     <div>
                       <h4 className="text-sm font-bold text-white">{pendingRequest.passengerName}</h4>
                       <p className="text-xs text-text-secondary">★ {pendingRequest.passengerRating || 5.0} pasajero</p>
                     </div>
                   </div>
-                  {pendingRequest.serviceType === 'REMOLCADA' && (
+                  {pendingRequest.serviceType === 'REMOLCADA' ? (
                     <span className="px-2 py-0.5 rounded-md bg-amber-500/20 border border-amber-500/40 text-[10px] font-black text-amber-400 uppercase tracking-wider">
                       Auxilio
                     </span>
-                  )}
+                  ) : pendingRequest.serviceType === 'MOTOCAR' ? (
+                    <span className="px-2 py-0.5 rounded-md bg-gold-primary/20 border border-gold-primary/40 text-[10px] font-black text-gold-primary uppercase tracking-wider">
+                      Carga
+                    </span>
+                  ) : pendingRequest.serviceType === 'TAXI_AUTO' ? (
+                    <span className="px-2 py-0.5 rounded-md bg-gold-primary/20 border border-gold-primary/40 text-[10px] font-black text-gold-primary uppercase tracking-wider">
+                      Auto
+                    </span>
+                  ) : null}
                 </div>
 
                 {/* Distance & ETA from driver to passenger pickup */}
@@ -935,6 +1034,12 @@ export const DriverHome = () => {
 
       {/* NEGOTIATION CHAT MODAL */}
       <NegotiationChatModal />
+
+      {/* DRIVER VEHICLE CONFIGURATION MODAL */}
+      <DriverVehicleModal
+        isOpen={showVehicleModal}
+        onClose={() => setShowVehicleModal(false)}
+      />
     </div>
   );
 };

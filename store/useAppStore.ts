@@ -1,6 +1,8 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
-import { DriverData, ChatMessage, TripHistoryItem, INITIAL_TRIPS, RIBERALTA_CENTER } from '@/services/mockData';
+import { DriverData, ChatMessage, TripHistoryItem, INITIAL_TRIPS, RIBERALTA_CENTER, VehicleType } from '@/services/mockData';
+
+export type { VehicleType };
 
 export type UserRole = 'PASSENGER' | 'DRIVER';
 export type AppView = 'SPLASH' | 'LOGIN' | 'REGISTER' | 'ROLE_SELECTION' | 'MAIN_APP';
@@ -47,6 +49,7 @@ export type UserProfile = {
   trips: number;
   role: UserRole;
   // Driver specific
+  vehicleType?: VehicleType;
   motorcycle?: string;
   plate?: string;
   verified?: boolean;
@@ -56,7 +59,7 @@ export type UserProfile = {
   freeTripsRemaining?: number; // 5 viajes de regalo sin comisión en su primera bienvenida
 };
 
-export type ServiceType = 'MOTOTAXI' | 'REMOLCADA';
+export type ServiceType = 'MOTOTAXI' | 'MOTOCAR' | 'TAXI_AUTO' | 'REMOLCADA';
 export type PaymentMethodType = 'CASH' | 'QR';
 export type PaymentStatusType = 'PENDING' | 'WAITING_DRIVER_CONFIRM' | 'CONFIRMED';
 

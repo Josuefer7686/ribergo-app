@@ -6,18 +6,21 @@ export interface DestinationOption {
   lng: number;
 }
 
+export type VehicleType = 'MOTOTAXI' | 'MOTOCAR' | 'TAXI_AUTO';
+
 export interface DriverData {
   id: string;
   name: string;
   rating: number | null;
   ratingsCount?: number;
   trips: number;
+  vehicleType?: VehicleType;
   motorcycle: string;
   plate: string;
   phone: string;
   avatar: string;
   currentLocation: { lat: number; lng: number };
-  heading?: number; // Angulo de dirección en grados (0 - 360) hacia donde apunta la moto
+  heading?: number; // Angulo de dirección en grados (0 - 360) hacia donde apunta el vehículo
   speed?: number; // Velocidad estimada en km/h
 }
 
