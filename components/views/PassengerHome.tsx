@@ -15,7 +15,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 
 import { TerminalView } from '@/components/terminal/TerminalView';
 import { NegotiationChatModal } from '@/components/modals/NegotiationChatModal';
-import { Wrench, Bus, AlertTriangle } from 'lucide-react';
+import { Wrench, Bus, AlertTriangle, Info } from 'lucide-react';
 import { useAutoLocation } from '@/hooks/useAutoLocation';
 import { calculateDistanceMeters, formatDistance, getBearingDirectionLabel } from '@/utils/geo';
 import { DriverData } from '@/services/mockData';
@@ -42,6 +42,7 @@ export const PassengerHome = () => {
   const [rating, setRating] = useState(5);
   const [reviewText, setReviewText] = useState('');
   const [customOffer, setCustomOffer] = useState<number | null>(null);
+  const [infoBubble, setInfoBubble] = useState<'MOTOCAR' | 'TAXI_AUTO' | null>(null);
   const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<'CASH' | 'QR'>('CASH');
   const [qrPaymentSent, setQrPaymentSent] = useState(false);
 
@@ -58,13 +59,13 @@ export const PassengerHome = () => {
 
   // Default fare calculation based on service type:
   // MOTOTAXI: 10 BOB
-  // MOTOCAR: 15 BOB (Carga, fletes y traslados pesados)
-  // TAXI_AUTO: 15 BOB (Auto taxi cómodo)
+  // MOTOCAR: 50 BOB (Carga, fletes y traslados pesados)
+  // TAXI_AUTO: 35 BOB (Auto taxi cómodo)
   // REMOLCADA: 15 BOB (Auxilio mecánico / remolque con pie a taller)
   const getBaseFare = (st: ServiceType) => {
     switch (st) {
-      case 'MOTOCAR': return 15;
-      case 'TAXI_AUTO': return 15;
+      case 'MOTOCAR': return 50;
+      case 'TAXI_AUTO': return 35;
       case 'REMOLCADA': return 15;
       case 'MOTOTAXI':
       default: return 10;
@@ -467,8 +468,9 @@ export const PassengerHome = () => {
                     onClick={() => {
                       haptics.selection();
                       setUrbanServiceType('MOTOTAXI');
+                      setInfoBubble(null);
                     }}
-                    className={`py-2 px-1.5 rounded-xl transition flex flex-col items-center justify-center gap-1 text-center ${
+                    className={`py-2.5 px-1.5 rounded-xl transition flex flex-col items-center justify-center gap-1 text-center ${
                       urbanServiceType === 'MOTOTAXI'
                         ? 'bg-gold-primary text-background font-black shadow-md shadow-gold-primary/25'
                         : 'text-text-secondary hover:text-white font-bold'
@@ -480,106 +482,152 @@ export const PassengerHome = () => {
                       className="w-5 h-5 object-contain" 
                     />
                     <span className="text-[11px] leading-tight font-extrabold">Mototaxi</span>
-                    <span className="text-[9px] font-semibold opacity-85 leading-none">10 BOB</span>
                   </button>
 
                   {/* Option 2: MOTOCAR (CARGA & FLETES) */}
-                  <button
-                    onClick={() => {
-                      haptics.selection();
-                      setUrbanServiceType('MOTOCAR');
-                    }}
-                    className={`py-2 px-1.5 rounded-xl transition flex flex-col items-center justify-center gap-1 text-center ${
-                      urbanServiceType === 'MOTOCAR'
-                        ? 'bg-gold-primary text-background font-black shadow-md shadow-gold-primary/25'
-                        : 'text-text-secondary hover:text-white font-bold'
-                    }`}
-                  >
-                    <img 
-                      src={urbanServiceType === 'MOTOCAR' ? '/icons/motocar.png' : '/icons/motocar_gold.png'} 
-                      alt="Motocar" 
-                      className="w-5 h-5 object-contain" 
-                    />
-                    <span className="text-[11px] leading-tight font-extrabold">Motocar</span>
-                    <span className="text-[9px] font-semibold opacity-85 leading-none">15 BOB • Carga</span>
-                  </button>
+                  <div className="relative">
+                    <button
+                      onClick={() => {
+                        haptics.selection();
+                        setUrbanServiceType('MOTOCAR');
+                      }}
+                      className={`w-full py-2.5 px-1.5 rounded-xl transition flex flex-col items-center justify-center gap-1 text-center ${
+                        urbanServiceType === 'MOTOCAR'
+                          ? 'bg-gold-primary text-background font-black shadow-md shadow-gold-primary/25'
+                          : 'text-text-secondary hover:text-white font-bold'
+                      }`}
+                    >
+                      <img 
+                        src={urbanServiceType === 'MOTOCAR' ? '/icons/motocar.png' : '/icons/motocar_gold.png'} 
+                        alt="Motocar" 
+                        className="w-5 h-5 object-contain" 
+                      />
+                      <span className="text-[11px] leading-tight font-extrabold">Motocar</span>
+                    </button>
+                    {/* Botón redondo de información (i) */}
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        haptics.selection();
+                        setInfoBubble(infoBubble === 'MOTOCAR' ? null : 'MOTOCAR');
+                      }}
+                      title="Información de Motocar"
+                      aria-label="Información de Motocar"
+                      className={`absolute top-1 right-1 p-1 rounded-full transition ${
+                        urbanServiceType === 'MOTOCAR'
+                          ? 'text-background hover:bg-black/15'
+                          : 'text-gold-primary hover:bg-white/10'
+                      }`}
+                    >
+                      <Info className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
 
                   {/* Option 3: TAXI AUTO */}
+                  <div className="relative">
+                    <button
+                      onClick={() => {
+                        haptics.selection();
+                        setUrbanServiceType('TAXI_AUTO');
+                      }}
+                      className={`w-full py-2.5 px-1.5 rounded-xl transition flex flex-col items-center justify-center gap-1 text-center ${
+                        urbanServiceType === 'TAXI_AUTO'
+                          ? 'bg-gold-primary text-background font-black shadow-md shadow-gold-primary/25'
+                          : 'text-text-secondary hover:text-white font-bold'
+                      }`}
+                    >
+                      <img 
+                        src={urbanServiceType === 'TAXI_AUTO' ? '/icons/taxi_auto.png' : '/icons/taxi_auto_gold.png'} 
+                        alt="Taxi Auto" 
+                        className="w-5 h-5 object-contain" 
+                      />
+                      <span className="text-[11px] leading-tight font-extrabold">Taxi Auto</span>
+                    </button>
+                    {/* Botón redondo de información (i) */}
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        haptics.selection();
+                        setInfoBubble(infoBubble === 'TAXI_AUTO' ? null : 'TAXI_AUTO');
+                      }}
+                      title="Información de Taxi Auto"
+                      aria-label="Información de Taxi Auto"
+                      className={`absolute top-1 right-1 p-1 rounded-full transition ${
+                        urbanServiceType === 'TAXI_AUTO'
+                          ? 'text-background hover:bg-black/15'
+                          : 'text-gold-primary hover:bg-white/10'
+                      }`}
+                    >
+                      <Info className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+
+                {/* GLOBITO INFORMATIVO TIPO TOOLTIP/POPOVER */}
+                <AnimatePresence>
+                  {infoBubble && (
+                    <motion.div
+                      initial={{ opacity: 0, scale: 0.95, y: -4 }}
+                      animate={{ opacity: 1, scale: 1, y: 0 }}
+                      exit={{ opacity: 0, scale: 0.95, y: -4 }}
+                      className="relative p-3 rounded-2xl bg-surface-2 border border-gold-primary/50 text-white text-xs shadow-xl backdrop-blur-xl flex items-start gap-2.5"
+                    >
+                      <div className="w-6 h-6 rounded-full bg-gold-primary/20 text-gold-primary flex items-center justify-center shrink-0 mt-0.5">
+                        <Info className="w-3.5 h-3.5" />
+                      </div>
+                      <div className="flex-1 pr-1">
+                        <p className="font-bold text-gold-light text-[12px]">
+                          {infoBubble === 'MOTOCAR' ? 'Motocar (Carga y Fletes)' : 'Taxi en Automóvil'}
+                        </p>
+                        <p className="text-[11px] text-text-secondary leading-snug mt-0.5">
+                          {infoBubble === 'MOTOCAR'
+                            ? 'Ideal para trasladar cosas pesadas, muebles pequeños, encomiendas o compras de mercado por Riberalta.'
+                            : 'Viaja con mayor confort, protección contra sol o lluvia y espacio para equipaje o acompañantes.'}
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setInfoBubble(null)}
+                        className="p-1 rounded-lg text-text-secondary hover:text-white hover:bg-white/10 transition shrink-0"
+                        title="Cerrar"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+
+                {/* Secondary SOS Option: AUXILIO MECÁNICO / REMOLQUE (Solo visible para Mototaxi) */}
+                {(urbanServiceType === 'MOTOTAXI' || urbanServiceType === 'REMOLCADA') && (
                   <button
                     onClick={() => {
                       haptics.selection();
-                      setUrbanServiceType('TAXI_AUTO');
+                      setUrbanServiceType(urbanServiceType === 'REMOLCADA' ? 'MOTOTAXI' : 'REMOLCADA');
                     }}
-                    className={`py-2 px-1.5 rounded-xl transition flex flex-col items-center justify-center gap-1 text-center ${
-                      urbanServiceType === 'TAXI_AUTO'
-                        ? 'bg-gold-primary text-background font-black shadow-md shadow-gold-primary/25'
-                        : 'text-text-secondary hover:text-white font-bold'
+                    className={`w-full py-2 px-3 rounded-xl border text-xs flex items-center justify-between transition ${
+                      urbanServiceType === 'REMOLCADA'
+                        ? 'bg-gradient-to-r from-amber-500/20 via-yellow-500/20 to-amber-500/20 border-amber-500 text-amber-300 font-extrabold shadow-sm'
+                        : 'bg-surface-2/60 hover:bg-surface-2 border-border-custom text-text-secondary hover:text-white font-semibold'
                     }`}
                   >
-                    <img 
-                      src={urbanServiceType === 'TAXI_AUTO' ? '/icons/taxi_auto.png' : '/icons/taxi_auto_gold.png'} 
-                      alt="Taxi Auto" 
-                      className="w-5 h-5 object-contain" 
-                    />
-                    <span className="text-[11px] leading-tight font-extrabold">Taxi Auto</span>
-                    <span className="text-[9px] font-semibold opacity-85 leading-none">15 BOB • Confort</span>
+                    <div className="flex items-center gap-2">
+                      <Wrench className={`w-3.5 h-3.5 ${urbanServiceType === 'REMOLCADA' ? 'text-amber-400' : 'text-text-secondary'}`} />
+                      <span>¿Moto varada? Auxilio / Remolcada con pie</span>
+                    </div>
                   </button>
-                </div>
-
-                {/* Secondary SOS Option: AUXILIO MECÁNICO / REMOLQUE */}
-                <button
-                  onClick={() => {
-                    haptics.selection();
-                    setUrbanServiceType(urbanServiceType === 'REMOLCADA' ? 'MOTOTAXI' : 'REMOLCADA');
-                  }}
-                  className={`w-full py-2 px-3 rounded-xl border text-xs flex items-center justify-between transition ${
-                    urbanServiceType === 'REMOLCADA'
-                      ? 'bg-gradient-to-r from-amber-500/20 via-yellow-500/20 to-amber-500/20 border-amber-500 text-amber-300 font-extrabold shadow-sm'
-                      : 'bg-surface-2/60 hover:bg-surface-2 border-border-custom text-text-secondary hover:text-white font-semibold'
-                  }`}
-                >
-                  <div className="flex items-center gap-2">
-                    <Wrench className={`w-3.5 h-3.5 ${urbanServiceType === 'REMOLCADA' ? 'text-amber-400' : 'text-text-secondary'}`} />
-                    <span>¿Moto varada? Auxilio / Remolcada con pie</span>
-                  </div>
-                  <span className="text-[10px] font-bold text-amber-400">15 BOB</span>
-                </button>
+                )}
               </div>
 
-              {/* MOTOCAR BANNER NOTICE */}
-              {urbanServiceType === 'MOTOCAR' && (
-                <div className="p-3 rounded-2xl bg-gold-primary/10 border border-gold-primary/30 text-gold-light text-xs flex items-start gap-2.5 animate-in fade-in duration-200">
-                  <img src="/icons/motocar_gold.png" alt="Motocar" className="w-5 h-5 object-contain shrink-0 mt-0.5" />
-                  <div>
-                    <p className="font-bold text-white">Motocar con Carrocería de Carga</p>
-                    <p className="text-[11px] text-text-secondary leading-snug">
-                      Ideal para trasladar cosas pesadas, fletes, muebles pequeños o compras del mercado por Riberalta.
-                    </p>
-                  </div>
-                </div>
-              )}
-
-              {/* TAXI AUTO BANNER NOTICE */}
-              {urbanServiceType === 'TAXI_AUTO' && (
-                <div className="p-3 rounded-2xl bg-gold-primary/10 border border-gold-primary/30 text-gold-light text-xs flex items-start gap-2.5 animate-in fade-in duration-200">
-                  <img src="/icons/taxi_auto_gold.png" alt="Taxi Auto" className="w-5 h-5 object-contain shrink-0 mt-0.5" />
-                  <div>
-                    <p className="font-bold text-white">Taxi en Automóvil</p>
-                    <p className="text-[11px] text-text-secondary leading-snug">
-                      Viaja con mayor confort, protección contra el clima y espacio para tus acompañantes o equipaje.
-                    </p>
-                  </div>
-                </div>
-              )}
-
-              {/* REMOLCADA BANNER NOTICE */}
+              {/* REMOLCADA BANNER NOTICE (Solo si está activo el modo remolcada) */}
               {urbanServiceType === 'REMOLCADA' && (
                 <div className="p-3 rounded-2xl bg-amber-500/15 border border-amber-500/40 text-amber-200 text-xs flex items-start gap-2.5 animate-in fade-in duration-200">
                   <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
                   <div>
                     <p className="font-bold text-white">Servicio de Auxilio Mecánico</p>
                     <p className="text-[11px] text-amber-200/80 leading-snug">
-                      Un mototaxista vendrá a tu ubicación y remolcará tu motocicleta con el pie hasta tu casa o taller mecánico en Riberalta.
+                      Un mototaxista vendrá a tu ubicación y remolcará tu motocicleta con el pie hasta tu casa o taller en Riberalta.
                     </p>
                   </div>
                 </div>

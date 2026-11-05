@@ -93,10 +93,25 @@ export const NegotiationChatModal = () => {
   const [adjustedFare, setAdjustedFare] = useState<number | null>(null);
   const debounceFareTimerRef = useRef<NodeJS.Timeout | null>(null);
 
+  // Tarifa base por defecto según tipo de vehículo / servicio:
+  // TAXI_AUTO: 35 Bs
+  // MOTOCAR: 50 Bs
+  // REMOLCADA: 15 Bs
+  // MOTOTAXI: 10 Bs
+  const getDefaultBaseFare = (serviceType?: string) => {
+    switch (serviceType) {
+      case 'MOTOCAR': return 50;
+      case 'TAXI_AUTO': return 35;
+      case 'REMOLCADA': return 15;
+      case 'MOTOTAXI':
+      default: return 10;
+    }
+  };
+
   // Tarifa efectiva: si el usuario está pulsando +/- usa adjustedFare local, de lo contrario la tarifa en store
   const localFare = adjustedFare !== null 
     ? adjustedFare 
-    : (activeTrip?.proposedPrice || activeTrip?.price || 10);
+    : (activeTrip?.proposedPrice || activeTrip?.price || getDefaultBaseFare(activeTrip?.serviceType));
 
   // Suscribirse a mensajes del chat
   useEffect(() => {
