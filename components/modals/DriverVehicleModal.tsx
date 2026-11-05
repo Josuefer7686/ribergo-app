@@ -6,6 +6,7 @@ import { VehicleType } from '@/services/mockData';
 import { apiService } from '@/services/apiService';
 import { IosModal } from '@/components/shared/IosModal';
 import { Check, ShieldCheck } from 'lucide-react';
+import { VehicleIcon } from '@/components/ui/VehicleIcon';
 import { haptics } from '@/utils/haptics';
 import { audio } from '@/utils/audio';
 
@@ -26,29 +27,25 @@ export const DriverVehicleModal = ({ isOpen, onClose }: DriverVehicleModalProps)
     type: VehicleType;
     title: string;
     description: string;
-    icon: string;
     badge: string;
   }[] = [
     {
       type: 'MOTOTAXI',
       title: 'Mototaxi Normal',
       description: 'Motocicleta tradicional para pasajeros',
-      icon: '/icons/mototaxi_gold.png',
       badge: 'Base 10 BOB',
     },
     {
       type: 'MOTOCAR',
       title: 'Motocar de Carga',
       description: 'Trimóvil con carrocería para traslados y cosas pesadas',
-      icon: '/icons/motocar_gold.png',
-      badge: 'Base 15 BOB',
+      badge: 'Base 50 BOB',
     },
     {
       type: 'TAXI_AUTO',
       title: 'Taxi en Automóvil',
       description: 'Auto cómodo de 4 ruedas para pasajeros',
-      icon: '/icons/taxi_auto_gold.png',
-      badge: 'Base 15 BOB',
+      badge: 'Base 35 BOB',
     },
   ];
 
@@ -129,8 +126,8 @@ export const DriverVehicleModal = ({ isOpen, onClose }: DriverVehicleModalProps)
                   }`}
                 >
                   <div className="flex items-center gap-3">
-                    <div className="w-11 h-11 rounded-xl bg-[#05080B] border border-gold-primary/40 flex items-center justify-center p-2 shrink-0 shadow-md">
-                      <img src={opt.icon} alt={opt.title} className="w-full h-full object-contain" />
+                    <div className="w-11 h-11 rounded-xl bg-[#05080B] border border-gold-primary/40 flex items-center justify-center p-2 text-gold-primary shrink-0 shadow-md">
+                      <VehicleIcon type={opt.type} className="w-6 h-6 stroke-[2.2]" />
                     </div>
                     <div>
                       <div className="flex items-center gap-2">

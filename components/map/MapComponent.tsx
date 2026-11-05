@@ -7,6 +7,7 @@ import { useAppStore } from '@/store/useAppStore';
 import { DriverData, VehicleType } from '@/services/mockData';
 import { apiService } from '@/services/apiService';
 import { Bike } from 'lucide-react';
+import { VehicleIcon, getVehicleSvgString } from '@/components/ui/VehicleIcon';
 import { haptics } from '@/utils/haptics';
 import { audio } from '@/utils/audio';
 import { fetchLiveRoute } from '@/utils/routing';
@@ -90,15 +91,9 @@ function getVehicleIcon(
   isMoving = false, 
   scale = 1.0
 ) {
-  const bgColor = active ? '#FFE885' : '#F4C542';
+  const strokeColor = active ? '#FFE885' : '#F4C542';
   const rotation = heading || 0;
-  
-  let iconUrl = '/icons/mototaxi_gold.png';
-  if (vehicleType === 'MOTOCAR') {
-    iconUrl = '/icons/motocar_gold.png';
-  } else if (vehicleType === 'TAXI_AUTO') {
-    iconUrl = '/icons/taxi_auto_gold.png';
-  }
+  const vehicleSvg = getVehicleSvgString(vehicleType, strokeColor, 22);
   
   return new L.DivIcon({
     html: `
@@ -111,14 +106,10 @@ function getVehicleIcon(
         <!-- Ambient Golden Pulse Ring -->
         <div style="position: absolute; inset: -4px; border-radius: 50%; background: rgba(244,197,66,0.25); ${isMoving || active ? 'animation: ping 1.8s cubic-bezier(0,0,0.2,1) infinite;' : ''} pointer-events: none;"></div>
 
-        <!-- Inner Vehicle Bubble with exact PNG icon -->
-        <div style="width: 38px; height: 38px; background: #05080B; border: 2.5px solid ${bgColor}; border-radius: 50%; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 14px rgba(0,0,0,0.85), 0 0 ${active ? '18px rgba(244,197,66,0.9)' : '10px rgba(244,197,66,0.45)'}; transform: scale(${active ? 1.15 : 1}); pointer-events: none;">
-          <div style="transform: rotate(${rotation}deg); transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1); display: flex; align-items: center; justify-content: center; pointer-events: none;">
-            <img 
-              src="${iconUrl}" 
-              alt="${vehicleType}" 
-              style="width: 22px; height: 22px; object-fit: contain; pointer-events: none; filter: drop-shadow(0 0 2px rgba(244,197,66,0.5));" 
-            />
+        <!-- Inner Vehicle Bubble with native vector SVG icon -->
+        <div style="width: 38px; height: 38px; background: #05080B; border: 2.5px solid ${strokeColor}; border-radius: 50%; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 14px rgba(0,0,0,0.85), 0 0 ${active ? '18px rgba(244,197,66,0.9)' : '10px rgba(244,197,66,0.45)'}; transform: scale(${active ? 1.15 : 1}); pointer-events: none;">
+          <div style="transform: rotate(${rotation}deg); transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1); display: flex; align-items: center; justify-content: center; pointer-events: none; filter: drop-shadow(0 0 2px rgba(244,197,66,0.5));">
+            ${vehicleSvg}
           </div>
         </div>
 
@@ -464,13 +455,10 @@ export default function MapComponent() {
                 const vType = driver.vehicleType || 'MOTOTAXI';
 
                 let vLabel = 'Mototaxi';
-                let vIconPath = '/icons/mototaxi_gold.png';
                 if (vType === 'MOTOCAR') {
                   vLabel = 'Motocar / Carga';
-                  vIconPath = '/icons/motocar_gold.png';
                 } else if (vType === 'TAXI_AUTO') {
                   vLabel = 'Taxi Auto';
-                  vIconPath = '/icons/taxi_auto_gold.png';
                 }
 
                 return (
@@ -496,7 +484,7 @@ export default function MapComponent() {
                         offset={[0, -28]}
                       >
                         <div className="flex items-center gap-2 px-3 py-1.5 rounded-2xl bg-[#05080B]/95 border-2 border-[#F4C542] text-xs font-black text-white shadow-[0_4px_20px_rgba(244,197,66,0.5)] animate-in fade-in zoom-in-95 duration-200">
-                          <img src={vIconPath} alt={vLabel} className="w-4 h-4 object-contain" />
+                          <VehicleIcon type={vType} className="w-4 h-4 text-gold-primary shrink-0" />
                           <div className="flex flex-col text-left">
                             <span className="tracking-wide text-white font-extrabold leading-tight">{driver.name || 'Conductor'}</span>
                             <span className="text-[9px] text-[#F4C542] font-semibold leading-tight">{vLabel}</span>

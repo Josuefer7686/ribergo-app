@@ -16,6 +16,7 @@ import { DriverWalletTutorialModal } from '@/components/modals/DriverWalletTutor
 import { QrTopupModal } from '@/components/modals/QrTopupModal';
 import { NegotiationChatModal } from '@/components/modals/NegotiationChatModal';
 import { DriverVehicleModal } from '@/components/modals/DriverVehicleModal';
+import { VehicleIcon } from '@/components/ui/VehicleIcon';
 import { VehicleType } from '@/services/mockData';
 
 export const DriverHome = () => {
@@ -550,17 +551,7 @@ export const DriverHome = () => {
               className="px-2.5 py-1.5 rounded-2xl bg-surface/90 border border-gold-primary/40 text-gold-primary backdrop-blur-md text-xs font-bold flex items-center gap-1.5 shadow-lg active:scale-95 hover:border-gold-primary"
               title="Configurar mi vehículo"
             >
-              <img 
-                src={
-                  user?.vehicleType === 'MOTOCAR' 
-                    ? '/icons/motocar_gold.png' 
-                    : user?.vehicleType === 'TAXI_AUTO' 
-                    ? '/icons/taxi_auto_gold.png' 
-                    : '/icons/mototaxi_gold.png'
-                } 
-                alt="Vehículo" 
-                className="w-4 h-4 object-contain" 
-              />
+              <VehicleIcon type={user?.vehicleType || 'MOTOTAXI'} className="w-4 h-4 text-gold-primary stroke-[2.2]" />
               <span className="max-w-[75px] truncate text-[11px] font-extrabold">
                 {user?.vehicleType === 'MOTOCAR' ? 'Motocar' : user?.vehicleType === 'TAXI_AUTO' ? 'Taxi Auto' : 'Mototaxi'}
               </span>
@@ -666,11 +657,7 @@ export const DriverHome = () => {
                   onClick={() => setShowVehicleModal(true)}
                   className="px-3 py-1.5 rounded-xl bg-surface-2 border border-border-custom hover:border-gold-primary/50 text-[11px] font-bold text-gold-primary flex items-center gap-1.5 transition active:scale-95"
                 >
-                  <img 
-                    src={user?.vehicleType === 'MOTOCAR' ? '/icons/motocar_gold.png' : user?.vehicleType === 'TAXI_AUTO' ? '/icons/taxi_auto_gold.png' : '/icons/mototaxi_gold.png'} 
-                    alt="Vehículo" 
-                    className="w-3.5 h-3.5 object-contain" 
-                  />
+                  <VehicleIcon type={user?.vehicleType || 'MOTOTAXI'} className="w-3.5 h-3.5 text-gold-primary stroke-[2.2]" />
                   <span>Mi Vehículo: {user?.vehicleType === 'MOTOCAR' ? 'Motocar' : user?.vehicleType === 'TAXI_AUTO' ? 'Taxi Auto' : 'Mototaxi'}</span>
                 </button>
               </div>
@@ -696,17 +683,7 @@ export const DriverHome = () => {
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
                   <div className="w-10 h-10 rounded-xl bg-gold-primary/10 border border-gold-primary/30 flex items-center justify-center p-2 text-gold-primary">
-                    <img 
-                      src={
-                        user?.vehicleType === 'MOTOCAR' 
-                          ? '/icons/motocar_gold.png' 
-                          : user?.vehicleType === 'TAXI_AUTO' 
-                          ? '/icons/taxi_auto_gold.png' 
-                          : '/icons/mototaxi_gold.png'
-                      } 
-                      alt="Vehículo" 
-                      className="w-full h-full object-contain animate-pulse" 
-                    />
+                    <VehicleIcon type={user?.vehicleType || 'MOTOTAXI'} className="w-6 h-6 text-gold-primary stroke-[2.2] animate-pulse" />
                   </div>
                   <div>
                     <h3 className="text-xs font-bold text-gold-primary uppercase tracking-wider">
@@ -760,12 +737,12 @@ export const DriverHome = () => {
                     </span>
                   ) : pendingRequest.serviceType === 'MOTOCAR' ? (
                     <span className="block text-[9px] font-black text-gold-primary uppercase tracking-wider flex items-center justify-end gap-1">
-                      <img src="/icons/motocar_gold.png" alt="Motocar" className="w-3.5 h-3.5 object-contain" />
+                      <VehicleIcon type="MOTOCAR" className="w-3.5 h-3.5 text-gold-primary stroke-[2.2]" />
                       Carga & Flete
                     </span>
                   ) : pendingRequest.serviceType === 'TAXI_AUTO' ? (
                     <span className="block text-[9px] font-black text-gold-primary uppercase tracking-wider flex items-center justify-end gap-1">
-                      <img src="/icons/taxi_auto_gold.png" alt="Auto" className="w-3.5 h-3.5 object-contain" />
+                      <VehicleIcon type="TAXI_AUTO" className="w-3.5 h-3.5 text-gold-primary stroke-[2.2]" />
                       Taxi Auto
                     </span>
                   ) : pendingRequest.price > 10 ? (
@@ -787,10 +764,8 @@ export const DriverHome = () => {
                     }`}>
                       {pendingRequest.serviceType === 'REMOLCADA' ? (
                         <Wrench className="w-5 h-5 animate-pulse" />
-                      ) : pendingRequest.serviceType === 'MOTOCAR' ? (
-                        <img src="/icons/motocar_gold.png" alt="Motocar" className="w-full h-full object-contain" />
-                      ) : pendingRequest.serviceType === 'TAXI_AUTO' ? (
-                        <img src="/icons/taxi_auto_gold.png" alt="Auto" className="w-full h-full object-contain" />
+                      ) : pendingRequest.serviceType ? (
+                        <VehicleIcon type={pendingRequest.serviceType} className="w-6 h-6 stroke-[2.2]" />
                       ) : (
                         <User className="w-5 h-5" />
                       )}

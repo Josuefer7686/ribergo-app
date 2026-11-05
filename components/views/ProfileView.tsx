@@ -13,6 +13,7 @@ import { audio } from '@/utils/audio';
 import { notifications } from '@/utils/notifications';
 import { usePwa } from '@/utils/pwa';
 import { DriverVehicleModal } from '@/components/modals/DriverVehicleModal';
+import { VehicleIcon } from '@/components/ui/VehicleIcon';
 
 export const ProfileView = () => {
   const { user, role, setRole, setCurrentView, logout, preferences, setPaymentMethod, toggleNotification, toggleSetting, setShowPwaModal } = useAppStore();
@@ -104,17 +105,7 @@ export const ProfileView = () => {
           <div className="p-4 rounded-2xl bg-surface border border-gold-primary/40 flex items-center justify-between shadow-lg">
             <div className="flex items-center gap-3">
               <div className="w-11 h-11 rounded-xl bg-[#05080B] border border-gold-primary/40 flex items-center justify-center p-2 text-gold-primary shrink-0 shadow-md">
-                <img 
-                  src={
-                    user?.vehicleType === 'MOTOCAR' 
-                      ? '/icons/motocar_gold.png' 
-                      : user?.vehicleType === 'TAXI_AUTO' 
-                      ? '/icons/taxi_auto_gold.png' 
-                      : '/icons/mototaxi_gold.png'
-                  } 
-                  alt="Vehículo" 
-                  className="w-full h-full object-contain" 
-                />
+                <VehicleIcon type={user?.vehicleType || 'MOTOTAXI'} className="w-6 h-6 stroke-[2.2]" />
               </div>
               <div>
                 <p className="text-xs font-bold text-white">
