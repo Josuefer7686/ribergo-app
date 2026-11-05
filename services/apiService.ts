@@ -622,8 +622,9 @@ export const apiService = {
 
   /**
    * Google Sign-In (Fastest 1-Tap Login)
+   * Retorna el perfil y si es su primer registro (o si le falta ingresar su teléfono)
    */
-  async loginWithGoogle(): Promise<UserProfile> {
+  async loginWithGoogle(): Promise<{ profile: UserProfile; isFirstTime: boolean }> {
     if (isFirebaseConfigured()) {
       try {
         const provider = new GoogleAuthProvider();
@@ -634,14 +635,17 @@ export const apiService = {
         const userDoc = await getDoc(userDocRef);
 
         if (userDoc.exists()) {
-          return userDoc.data() as UserProfile;
+          const profile = userDoc.data() as UserProfile;
+          const cleanPhone = (profile.phone || '').replace(/[^0-9]/g, '');
+          const isFirstTime = !profile.phone || cleanPhone.length < 8 || cleanPhone === '59170000000';
+          return { profile, isFirstTime };
         }
 
         const newProfile: UserProfile = {
           id: user.uid,
-          name: user.displayName || user.email?.split('@')[0] || 'Usuario Google',
+          name: user.displayName || user.email?.split('@')[0] || 'Usuario RiberGO',
           email: user.email || '',
-          phone: user.phoneNumber || '+591 70000000',
+          phone: user.phoneNumber || '',
           avatar: user.photoURL || undefined,
           rating: null,
           ratingsCount: 0,
@@ -654,7 +658,7 @@ export const apiService = {
           createdAt: serverTimestamp(),
         });
 
-        return newProfile;
+        return { profile: newProfile, isFirstTime: true };
       } catch (err: any) {
         console.error('Google Sign-In Error:', err);
         throw err;
@@ -663,15 +667,36 @@ export const apiService = {
 
     // Demo Fallback
     return {
-      id: 'usr-google-demo',
-      name: 'Usuario Google RiberGO',
-      email: 'usuario@gmail.com',
-      phone: '+591 71234567',
-      rating: null,
-      ratingsCount: 0,
-      trips: 0,
-      role: 'PASSENGER',
+      profile: {
+        id: 'usr-google-demo',
+        name: 'Usuario Google RiberGO',
+        email: 'usuario@gmail.com',
+        phone: '',
+        rating: null,
+        ratingsCount: 0,
+        trips: 0,
+        role: 'PASSENGER',
+      },
+      isFirstTime: true,
     };
+  },
+
+  /**
+   * Actualizar número de celular del usuario en Firestore
+   */
+  async updateUserPhone(userId: string, phone: string): Promise<string> {
+    const formatted = formatPhoneNumber(phone);
+    if (isFirebaseConfigured() && userId) {
+      try {
+        await updateDoc(doc(db, 'users', userId), {
+          phone: formatted,
+          updatedAt: serverTimestamp(),
+        });
+      } catch (err) {
+        console.warn('Error updating user phone in Firestore:', err);
+      }
+    }
+    return formatted;
   },
 
   /**
