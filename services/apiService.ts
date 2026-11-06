@@ -1870,7 +1870,6 @@ export const apiService = {
     if (isFirebaseConfigured() && driverId) {
       try {
         const rechargeId = 'rec-' + Date.now();
-        // 1. Guardar la recarga en la colección 'wallet_recharges'
         await setDoc(doc(db, 'wallet_recharges', rechargeId), {
           id: rechargeId,
           driverId,
@@ -1883,7 +1882,6 @@ export const apiService = {
           timestamp: serverTimestamp(),
         });
 
-        // 2. Actualizar el saldo del conductor en 'users'
         await setDoc(doc(db, 'users', driverId), {
           walletBalance: newBalance,
           updatedAt: serverTimestamp(),
@@ -1893,6 +1891,58 @@ export const apiService = {
       }
     }
     return newBalance;
+  },
+
+  /**
+   * Enviar solicitud de recarga con comprobante al bot administrador de Telegram
+   */
+  async submitRechargeRequest(payload: {
+    receipt: File | Blob;
+    driverId: string;
+    driverName: string;
+    driverPhone: string;
+    vehicle: string;
+    amount: number;
+    currentBalance: number;
+  }): Promise<{ ok: boolean; rechargeId?: string; error?: string }> {
+    try {
+      const formData = new FormData();
+      formData.append('receipt', payload.receipt);
+      formData.append('driverId', payload.driverId);
+      formData.append('driverName', payload.driverName);
+      formData.append('driverPhone', payload.driverPhone);
+      formData.append('vehicle', payload.vehicle);
+      formData.append('amount', String(payload.amount));
+      formData.append('currentBalance', String(payload.currentBalance));
+
+      const res = await fetch('/api/wallet/request-topup', {
+        method: 'POST',
+        body: formData,
+      });
+
+      return await res.json();
+    } catch (e: any) {
+      console.error('Error submitting recharge request:', e);
+      return { ok: false, error: e?.message || 'Error de conexión' };
+    }
+  },
+
+  /**
+   * Escuchar en tiempo real la aprobación o rechazo de una recarga
+   */
+  subscribeToRecharge(rechargeId: string, callback: (recharge: any) => void): () => void {
+    if (!rechargeId || !isFirebaseConfigured()) return () => {};
+
+    try {
+      return onSnapshot(doc(db, 'wallet_recharges', rechargeId), (snapshot) => {
+        if (snapshot.exists()) {
+          callback({ id: snapshot.id, ...snapshot.data() });
+        }
+      });
+    } catch (e) {
+      console.warn('Error subscribing to recharge:', e);
+      return () => {};
+    }
   },
 
   /**
