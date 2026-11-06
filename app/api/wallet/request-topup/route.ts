@@ -31,36 +31,38 @@ export async function POST(req: NextRequest) {
       second: '2-digit',
     });
 
-    // 1. Guardar la solicitud en Firestore en estado PENDING
-    const rechargeDocRef = doc(db, 'wallet_recharges', rechargeId);
-    await setDoc(rechargeDocRef, {
-      id: rechargeId,
-      driverId,
-      driverName,
-      driverPhone,
-      vehicle,
-      amount,
-      currentBalance,
-      status: 'PENDING',
-      createdAtMs: nowMs,
-      createdAt: serverTimestamp(),
-      formattedDate: dateStr,
-    });
-
-    // 2. Obtener el Chat ID del administrador desde Firestore o Variable de entorno
-    let adminChatId = process.env.TELEGRAM_ADMIN_CHAT_ID;
-    if (!adminChatId) {
-      try {
-        const configSnap = await getDoc(doc(db, 'system_config', 'telegram_admin'));
-        if (configSnap.exists()) {
-          adminChatId = configSnap.data()?.chatId;
-        }
-      } catch (e) {
-        console.warn('Error reading telegram_admin config:', e);
-      }
+    // 1. Guardar la solicitud en Firestore en estado PENDING (con resiliencia a permisos)
+    try {
+      const rechargeDocRef = doc(db, 'wallet_recharges', rechargeId);
+      await setDoc(rechargeDocRef, {
+        id: rechargeId,
+        driverId,
+        driverName,
+        driverPhone,
+        vehicle,
+        amount,
+        currentBalance,
+        status: 'PENDING',
+        createdAtMs: nowMs,
+        createdAt: serverTimestamp(),
+        formattedDate: dateStr,
+      });
+    } catch (fsErr) {
+      console.warn('Advertencia guardando en Firestore wallet_recharges:', fsErr);
     }
 
-    // 3. Si hay administrador configurado y se adjuntó comprobante, despachar a Telegram
+    // 2. Obtener el Chat ID del administrador (con fallback al ID verificado 6344399294)
+    let adminChatId = process.env.TELEGRAM_ADMIN_CHAT_ID || '6344399294';
+    try {
+      const configSnap = await getDoc(doc(db, 'system_config', 'telegram_admin'));
+      if (configSnap.exists() && configSnap.data()?.chatId) {
+        adminChatId = String(configSnap.data()?.chatId);
+      }
+    } catch (e) {
+      // Usar fallback 6344399294
+    }
+
+    // 3. Despachar solicitud con foto al Telegram del administrador
     if (adminChatId) {
       const caption = 
 `🔔 *NUEVA SOLICITUD DE RECARGA DE SALDO*

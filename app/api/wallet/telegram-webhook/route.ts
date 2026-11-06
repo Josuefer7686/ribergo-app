@@ -56,48 +56,64 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ ok: true });
       }
 
+      let recharge: any = null;
       const rechargeRef = doc(db, 'wallet_recharges', rechargeId);
-      const rechargeSnap = await getDoc(rechargeRef);
-
-      if (!rechargeSnap.exists()) {
-        await answerCallback(callbackId, '⚠️ No se encontró la solicitud de recarga.');
-        return NextResponse.json({ ok: true });
+      try {
+        const rechargeSnap = await getDoc(rechargeRef);
+        if (rechargeSnap.exists()) {
+          recharge = rechargeSnap.data();
+        }
+      } catch (err) {
+        console.warn('Advertencia leyendo recharge de Firestore:', err);
       }
 
-      const recharge = rechargeSnap.data() as any;
-
-      if (recharge.status === 'APPROVED') {
+      if (recharge && recharge.status === 'APPROVED') {
         await answerCallback(callbackId, '⚠️ Esta recarga ya fue aprobada previamente.');
         return NextResponse.json({ ok: true });
       }
 
-      if (recharge.status === 'REJECTED') {
+      if (recharge && recharge.status === 'REJECTED') {
         await answerCallback(callbackId, '⚠️ Esta recarga ya fue rechazada previamente.');
         return NextResponse.json({ ok: true });
       }
 
       const timeStr = new Date().toLocaleTimeString('es-BO', { hour: '2-digit', minute: '2-digit' });
 
-      if (action === 'approve') {
-        const amount = Number(recharge.amount) || 0;
-        const driverId = recharge.driverId;
+      // Obtener amount y driverId ya sea de Firestore o de los datos del mensaje
+      let amount = recharge ? (Number(recharge.amount) || 0) : 0;
+      let driverId = recharge ? recharge.driverId : '';
 
-        // 1. Marcar recarga como aprobada
-        await updateDoc(rechargeRef, {
-          status: 'APPROVED',
-          approvedAtMs: Date.now(),
-          approvedAt: serverTimestamp(),
-        });
+      if ((!amount || !driverId) && message?.caption) {
+        const idMatch = message.caption.match(/ID Conductor:\* `([^`]+)`/);
+        if (idMatch) driverId = idMatch[1];
+        const amountMatch = message.caption.match(/Monto Solicitado:\* \*([0-9.]+)\s*BOB\*/);
+        if (amountMatch) amount = Number(amountMatch[1]) || 0;
+      }
+
+      if (action === 'approve') {
+        // 1. Marcar recarga como aprobada en Firestore
+        try {
+          await updateDoc(rechargeRef, {
+            status: 'APPROVED',
+            approvedAtMs: Date.now(),
+            approvedAt: serverTimestamp(),
+          });
+        } catch (fsErr) {
+          console.warn('No se pudo actualizar estado de wallet_recharge en Firestore:', fsErr);
+        }
 
         // 2. Incrementar saldo atómicamente en el documento del conductor
-        if (driverId) {
-          const userDocRef = doc(db, 'users', driverId);
-          await updateDoc(userDocRef, {
-            walletBalance: increment(amount),
-          }).catch(async () => {
-            // Si el campo no existía previamente
-            await setDoc(userDocRef, { walletBalance: amount }, { merge: true });
-          });
+        if (driverId && amount > 0) {
+          try {
+            const userDocRef = doc(db, 'users', driverId);
+            await updateDoc(userDocRef, {
+              walletBalance: increment(amount),
+            }).catch(async () => {
+              await setDoc(userDocRef, { walletBalance: amount }, { merge: true });
+            });
+          } catch (userErr) {
+            console.warn('No se pudo actualizar saldo en users Firestore:', userErr);
+          }
         }
 
         // 3. Responder al click en Telegram
@@ -121,12 +137,16 @@ export async function POST(req: NextRequest) {
           });
         }
       } else if (action === 'reject') {
-        // 1. Marcar recarga como rechazada
-        await updateDoc(rechargeRef, {
-          status: 'REJECTED',
-          rejectedAtMs: Date.now(),
-          rejectedAt: serverTimestamp(),
-        });
+        // 1. Marcar recarga como rechazada en Firestore
+        try {
+          await updateDoc(rechargeRef, {
+            status: 'REJECTED',
+            rejectedAtMs: Date.now(),
+            rejectedAt: serverTimestamp(),
+          });
+        } catch (fsErr) {
+          console.warn('No se pudo actualizar estado rejected en Firestore:', fsErr);
+        }
 
         // 2. Responder al click en Telegram
         await answerCallback(callbackId, '❌ Recarga rechazada.');

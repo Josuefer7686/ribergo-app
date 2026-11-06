@@ -1096,6 +1096,8 @@ export const apiService = {
             }
             callback(fullBox);
           }
+        }, (err) => {
+          console.warn('Firestore driver_boxes notice:', err?.message || err);
         });
       } catch (err) {
         console.warn('Error subscribing to driver box:', err);
@@ -1934,11 +1936,17 @@ export const apiService = {
     if (!rechargeId || !isFirebaseConfigured()) return () => {};
 
     try {
-      return onSnapshot(doc(db, 'wallet_recharges', rechargeId), (snapshot) => {
-        if (snapshot.exists()) {
-          callback({ id: snapshot.id, ...snapshot.data() });
+      return onSnapshot(
+        doc(db, 'wallet_recharges', rechargeId),
+        (snapshot) => {
+          if (snapshot.exists()) {
+            callback({ id: snapshot.id, ...snapshot.data() });
+          }
+        },
+        (err) => {
+          console.warn('Firestore wallet_recharges notice:', err?.message || err);
         }
-      });
+      );
     } catch (e) {
       console.warn('Error subscribing to recharge:', e);
       return () => {};

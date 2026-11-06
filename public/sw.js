@@ -1,4 +1,4 @@
-const CACHE_NAME = 'ribergo-v2.6';
+const CACHE_NAME = 'ribergo-v2.8';
 const ASSETS_TO_CACHE = [
   '/',
   '/manifest.json',
@@ -57,6 +57,11 @@ self.addEventListener('fetch', (event) => {
 
   const url = new URL(event.request.url);
 
+  // Do not intercept or cache any Next.js API routes (/api/*)
+  if (url.pathname.startsWith('/api/')) {
+    return;
+  }
+
   // Do not intercept or cache external auth/database/recaptcha APIs
   if (
     url.hostname.includes('firebase') ||
@@ -80,9 +85,15 @@ self.addEventListener('fetch', (event) => {
     event.respondWith(
       fetch(event.request)
         .then((response) => {
-          if (response && response.status === 200) {
+          if (response && response.status === 200 && event.request.method === 'GET') {
             const responseClone = response.clone();
-            caches.open(CACHE_NAME).then((cache) => cache.put(event.request, responseClone));
+            caches.open(CACHE_NAME).then((cache) => {
+              try {
+                cache.put(event.request, responseClone);
+              } catch (e) {
+                // Ignore Cache put errors
+              }
+            });
           }
           return response;
         })
@@ -106,9 +117,15 @@ self.addEventListener('fetch', (event) => {
     caches.match(event.request).then((response) => {
       const fetchPromise = fetch(event.request)
         .then((networkResponse) => {
-          if (networkResponse && networkResponse.status === 200) {
+          if (networkResponse && networkResponse.status === 200 && event.request.method === 'GET') {
             const clone = networkResponse.clone();
-            caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
+            caches.open(CACHE_NAME).then((cache) => {
+              try {
+                cache.put(event.request, clone);
+              } catch (e) {
+                // Ignore Cache put errors
+              }
+            });
           }
           return networkResponse;
         })
