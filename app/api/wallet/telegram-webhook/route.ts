@@ -14,17 +14,21 @@ export async function POST(req: NextRequest) {
       const text = (update.message.text || '').trim();
       const senderName = update.message.from?.first_name || 'Administrador';
 
-      // Guardar el Chat ID en Firestore para que el sistema sepa a quién enviar las solicitudes
-      await setDoc(
-        doc(db, 'system_config', 'telegram_admin'),
-        {
-          chatId: String(chatId),
-          adminName: senderName,
-          updatedAt: serverTimestamp(),
-          updatedAtMs: Date.now(),
-        },
-        { merge: true }
-      );
+      // Guardar el Chat ID en Firestore si es posible (resiliente a permisos)
+      try {
+        await setDoc(
+          doc(db, 'system_config', 'telegram_admin'),
+          {
+            chatId: String(chatId),
+            adminName: senderName,
+            updatedAt: serverTimestamp(),
+            updatedAtMs: Date.now(),
+          },
+          { merge: true }
+        );
+      } catch (fsErr) {
+        console.warn('Advertencia guardando telegram_admin en Firestore:', fsErr);
+      }
 
       // Responder con mensaje de confirmación
       await fetch(`https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`, {
@@ -176,7 +180,8 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true });
   } catch (err: any) {
     console.error('Error handling Telegram webhook:', err);
-    return NextResponse.json({ ok: false, error: err?.message }, { status: 500 });
+    // Siempre responder 200 a Telegram para que no repita peticiones fallidas en bucle
+    return NextResponse.json({ ok: true, handledError: err?.message });
   }
 }
 
