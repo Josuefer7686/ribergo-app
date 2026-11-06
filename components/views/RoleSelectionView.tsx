@@ -2,16 +2,19 @@
 
 import { useState, useEffect } from 'react';
 import { useAppStore } from '@/store/useAppStore';
-import { User, Bike, ChevronRight, Sparkles, Shield, AlertCircle } from 'lucide-react';
+import { User, Bike, ChevronRight, Sparkles, Shield, AlertCircle, Check } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { haptics } from '@/utils/haptics';
 import { audio } from '@/utils/audio';
 import { apiService } from '@/services/apiService';
+import { VehicleIcon } from '@/components/ui/VehicleIcon';
+import { VehicleType } from '@/services/mockData';
 
 export const RoleSelectionView = () => {
   const { user, updateUserProfile, setRole, setCurrentView } = useAppStore();
 
   const [showDriverSetup, setShowDriverSetup] = useState(false);
+  const [vehicleType, setVehicleType] = useState<VehicleType>('MOTOTAXI');
   const [motorcycle, setMotorcycle] = useState(user?.motorcycle || 'Honda Wave 110');
   const [errorMsg, setErrorMsg] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -36,8 +39,8 @@ export const RoleSelectionView = () => {
       return;
     }
 
-    // Si seleccionó Conductor: verificar si ya tiene moto registrada
-    if (user?.motorcycle) {
+    // Si seleccionó Conductor: si ya tiene moto o tipo registrado, continuar; de lo contrario, mostrar formulario de vehículo
+    if (user?.motorcycle && user?.vehicleType) {
       setRole('DRIVER');
       updateUserProfile({ role: 'DRIVER', hasSelectedRole: true });
       if (user?.id) {
@@ -45,7 +48,6 @@ export const RoleSelectionView = () => {
       }
       setCurrentView('MAIN_APP');
     } else {
-      // Es su primera vez como conductor: mostrar formulario de moto
       setShowDriverSetup(true);
     }
   };
@@ -53,7 +55,7 @@ export const RoleSelectionView = () => {
   const handleConfirmDriverRegistration = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!motorcycle.trim()) {
-      setErrorMsg('Por favor ingresa el modelo o color de tu moto (ej. Honda Wave 110 Roja)');
+      setErrorMsg('Por favor ingresa el nombre o modelo de tu vehículo');
       return;
     }
 
@@ -65,11 +67,11 @@ export const RoleSelectionView = () => {
       role: 'DRIVER' as const,
       hasSelectedRole: true,
       motorcycle: motorcycle.trim(),
-      vehicleType: 'MOTOTAXI' as const,
+      vehicleType: vehicleType,
       verified: true,
       walletBalance: user?.walletBalance ?? 0.00,
       freeTripsRemaining: 5, // 5 viajes de bienvenida sin comisión garantizados al nuevo conductor
-      hasCompletedDriverTutorial: false, // Para que vea el tutorial explicativo interactivo
+      hasCompletedDriverTutorial: false,
     };
 
     updateUserProfile(updatedData);
@@ -160,11 +162,11 @@ export const RoleSelectionView = () => {
           >
             <div className="text-center space-y-1">
               <div className="w-12 h-12 rounded-2xl bg-gold-primary/10 border border-gold-primary/30 flex items-center justify-center text-gold-primary mx-auto">
-                <Bike className="w-6 h-6" />
+                <VehicleIcon type={vehicleType} className="w-6 h-6 stroke-[2.2]" />
               </div>
-              <h3 className="text-lg font-black text-white">Registro de Mototaxista</h3>
+              <h3 className="text-lg font-black text-white">Registro de Conductor</h3>
               <p className="text-xs text-text-secondary">
-                Completa los datos de tu motocicleta para identificarte ante tus pasajeros en Riberalta.
+                Elige qué tipo de vehículo conduces en Riberalta y completa sus datos.
               </p>
             </div>
 
@@ -174,7 +176,7 @@ export const RoleSelectionView = () => {
               <div>
                 <p className="font-bold text-gold-primary">¡Regalo de Bienvenida Activado!</p>
                 <p className="text-[11px] text-text-secondary leading-snug">
-                  Recibes <strong className="text-white">5 viajes 100% libres de comisión</strong>. Cobrarás los 10 Bs íntegros de cada viaje directo a tu bolsillo.
+                  Recibes <strong className="text-white">5 viajes 100% libres de comisión</strong>. Cobrarás los ingresos íntegros directo a tu bolsillo.
                 </p>
               </div>
             </div>
@@ -187,20 +189,68 @@ export const RoleSelectionView = () => {
             )}
 
             <form onSubmit={handleConfirmDriverRegistration} className="space-y-3.5">
+              {/* Selector de Tipo de Vehículo */}
+              <div>
+                <label className="text-[11px] font-bold text-text-secondary uppercase block mb-1.5">
+                  ¿Qué tipo de vehículo conduces?
+                </label>
+                <div className="grid grid-cols-3 gap-2">
+                  {[
+                    { type: 'MOTOTAXI' as const, label: 'Mototaxi', sub: 'Moto' },
+                    { type: 'TAXI_AUTO' as const, label: 'Taxi Auto', sub: 'Auto' },
+                    { type: 'MOTOCAR' as const, label: 'Motocar', sub: 'Carga' },
+                  ].map((item) => {
+                    const isSelected = vehicleType === item.type;
+                    return (
+                      <button
+                        key={item.type}
+                        type="button"
+                        onClick={() => {
+                          haptics.selection();
+                          setVehicleType(item.type);
+                          if (item.type === 'MOTOTAXI' && (!motorcycle || motorcycle.includes('Toyota') || motorcycle.includes('Torito') || motorcycle.includes('Kingwong'))) {
+                            setMotorcycle('Honda Wave 110');
+                          } else if (item.type === 'TAXI_AUTO' && (!motorcycle || motorcycle.includes('Wave') || motorcycle.includes('Torito') || motorcycle.includes('Kingwong'))) {
+                            setMotorcycle('Toyota Caldina');
+                          } else if (item.type === 'MOTOCAR' && (!motorcycle || motorcycle.includes('Wave') || motorcycle.includes('Toyota') || motorcycle.includes('Caldina'))) {
+                            setMotorcycle('Kingwong 200cc');
+                          }
+                        }}
+                        className={`p-2.5 rounded-xl border flex flex-col items-center justify-center gap-1 transition ${
+                          isSelected
+                            ? 'bg-gold-primary text-background font-black border-gold-primary shadow-md shadow-gold-primary/25'
+                            : 'bg-surface-2 border-border-custom text-text-secondary hover:text-white font-bold'
+                        }`}
+                      >
+                        <VehicleIcon type={item.type} className={`w-5 h-5 ${isSelected ? 'text-background stroke-[2.5]' : 'text-gold-primary stroke-[2.2]'}`} />
+                        <span className="text-[11px] font-extrabold leading-tight">{item.label}</span>
+                        <span className={`text-[9px] ${isSelected ? 'text-background/80' : 'text-text-secondary'}`}>{item.sub}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
               <div>
                 <label className="text-[11px] font-bold text-text-secondary uppercase">
-                  Marca, Modelo o Color de tu Moto
+                  Marca, Modelo o Color del Vehículo
                 </label>
                 <input
                   type="text"
                   value={motorcycle}
                   onChange={(e) => setMotorcycle(e.target.value)}
-                  placeholder="Ej. Honda Wave 110 Roja, Suzuki AX100, Boxer Negra"
+                  placeholder={
+                    vehicleType === 'TAXI_AUTO'
+                      ? 'Ej. Toyota Caldina Blanca, Corolla'
+                      : vehicleType === 'MOTOCAR'
+                      ? 'Ej. Kingwong 200cc, Torito Bajaj Azul'
+                      : 'Ej. Honda Wave 110 Roja, Suzuki AX100'
+                  }
                   className="w-full mt-1 bg-surface-2 border border-border-custom rounded-xl py-2.5 px-3 text-sm text-white placeholder-text-secondary focus:outline-none focus:border-gold-primary transition"
                   required
                 />
                 <p className="text-[10px] text-text-secondary mt-1">
-                  Así tu pasajero te reconocerá fácilmente al llegar.
+                  Así tus pasajeros te reconocerán fácilmente al llegar.
                 </p>
               </div>
 

@@ -15,7 +15,6 @@ import { apiService, realtimeSyncBus } from '@/services/apiService';
 import { DriverWalletTutorialModal } from '@/components/modals/DriverWalletTutorialModal';
 import { QrTopupModal } from '@/components/modals/QrTopupModal';
 import { NegotiationChatModal } from '@/components/modals/NegotiationChatModal';
-import { DriverVehicleModal } from '@/components/modals/DriverVehicleModal';
 import { VehicleIcon } from '@/components/ui/VehicleIcon';
 import { VehicleType } from '@/services/mockData';
 
@@ -35,7 +34,6 @@ export const DriverHome = () => {
     return Boolean(user?.role === 'DRIVER' && !user?.hasCompletedDriverTutorial);
   });
   const [showQrModal, setShowQrModal] = useState(false);
-  const [showVehicleModal, setShowVehicleModal] = useState(false);
   const [lowBalanceBanner, setLowBalanceBanner] = useState(false);
 
   const lastLocationRef = useRef<LocationPoint | null>(currentLocation);
@@ -281,9 +279,10 @@ export const DriverHome = () => {
       const allRejected = Array.from(new Set([...rejectedRideIds, ...rejected]));
       const availableRides = pendingRides.filter((r) => !allRejected.includes(r.id));
 
-      const currentState = driverStateRef.current;
-      const currentActiveTrip = activeTripRef.current;
-      const currentPending = pendingRequestRef.current;
+      const store = useAppStore.getState();
+      const currentState = store.driverState;
+      const currentActiveTrip = store.activeTrip;
+      const currentPending = store.pendingRequest;
 
       // Solo ignorar si el conductor ya tiene un viaje activo en curso
       const isTripOngoing = currentActiveTrip && (
@@ -297,10 +296,11 @@ export const DriverHome = () => {
         return;
       }
 
-      // Si el chofer está en la tarjeta de solicitud entrante pero el viaje fue tomado por otro o cancelado
+      // Si el chofer ya está visualizando la tarjeta de solicitud entrante (15s):
       if (currentState === 'RIDE_REQUEST' && currentPending && !isAcceptingRef.current) {
-        const stillInAvailable = availableRides.some((r) => r.id === currentPending.id);
-        if (!stillInAvailable && availableRides.length > 0) {
+        // Solo cancelar si la solicitud fue tomada por otro conductor o explícitamente cancelada
+        const matchingRide = pendingRides.find((r) => r.id === currentPending.id);
+        if (matchingRide && matchingRide.driverId && matchingRide.driverId !== driverId) {
           setPendingRequest(null);
           setDriverState('ONLINE');
           lastAlertedRideIdRef.current = null;
@@ -339,7 +339,7 @@ export const DriverHome = () => {
     }, driverVehicleType);
 
     return () => unsubscribe();
-  }, [isOnline, rejectedRideIds, user?.vehicleType, setPendingRequest, setDriverState]);
+  }, [isOnline, rejectedRideIds, user?.vehicleType, driverId, setPendingRequest, setDriverState]);
 
   // Request countdown timer with sound & haptic alerts
   useEffect(() => {
@@ -542,21 +542,6 @@ export const DriverHome = () => {
           </div>
 
           <div className="flex items-center gap-2">
-            {/* Driver Vehicle Switcher Pill */}
-            <button
-              onClick={() => {
-                haptics.selection();
-                setShowVehicleModal(true);
-              }}
-              className="px-2.5 py-1.5 rounded-2xl bg-surface/90 border border-gold-primary/40 text-gold-primary backdrop-blur-md text-xs font-bold flex items-center gap-1.5 shadow-lg active:scale-95 hover:border-gold-primary"
-              title="Configurar mi vehículo"
-            >
-              <VehicleIcon type={user?.vehicleType || 'MOTOTAXI'} className="w-4 h-4 text-gold-primary stroke-[2.2]" />
-              <span className="max-w-[75px] truncate text-[11px] font-extrabold">
-                {user?.vehicleType === 'MOTOCAR' ? 'Motocar' : user?.vehicleType === 'TAXI_AUTO' ? 'Taxi Auto' : 'Mototaxi'}
-              </span>
-            </button>
-
             {/* Free Trips Gift Badge */}
             {freeTrips > 0 && (
               <div className="px-2.5 py-1.5 rounded-2xl bg-gradient-to-r from-amber-500/20 to-yellow-500/20 border border-gold-primary text-gold-primary backdrop-blur-md text-xs font-black flex items-center gap-1 shadow-lg animate-pulse">
@@ -626,7 +611,7 @@ export const DriverHome = () => {
 
       {/* Bottom Floating Cards */}
       <div className="relative z-10 pb-safe px-4 pb-4 w-full max-w-[430px] mx-auto">
-        <AnimatePresence mode="wait">
+        <AnimatePresence>
           {/* OFFLINE */}
           {driverState === 'OFFLINE' && (
             <motion.div
@@ -646,20 +631,8 @@ export const DriverHome = () => {
                     ? `¡Tienes ${freeTrips} viajes gratis de bienvenida sin comisión!`
                     : walletBalance <= 0 
                     ? 'Recarga tu saldo para volver a conectarte.' 
-                    : `Conéctate para recibir solicitudes de ${user?.vehicleType === 'MOTOCAR' ? 'motocar de carga' : user?.vehicleType === 'TAXI_AUTO' ? 'taxi auto' : 'mototaxi'} en Riberalta.`}
+                    : 'Conéctate para recibir solicitudes de mototaxi en Riberalta.'}
                 </p>
-              </div>
-
-              {/* Botón rápido para configurar vehículo */}
-              <div className="flex items-center justify-center gap-2 pt-1">
-                <button
-                  type="button"
-                  onClick={() => setShowVehicleModal(true)}
-                  className="px-3 py-1.5 rounded-xl bg-surface-2 border border-border-custom hover:border-gold-primary/50 text-[11px] font-bold text-gold-primary flex items-center gap-1.5 transition active:scale-95"
-                >
-                  <VehicleIcon type={user?.vehicleType || 'MOTOTAXI'} className="w-3.5 h-3.5 text-gold-primary stroke-[2.2]" />
-                  <span>Mi Vehículo: {user?.vehicleType === 'MOTOCAR' ? 'Motocar' : user?.vehicleType === 'TAXI_AUTO' ? 'Taxi Auto' : 'Mototaxi'}</span>
-                </button>
               </div>
 
               <button
@@ -680,28 +653,16 @@ export const DriverHome = () => {
               exit={{ y: 50, opacity: 0 }}
               className="p-5 rounded-3xl bg-surface/95 border border-border-custom backdrop-blur-xl shadow-2xl space-y-3"
             >
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-xl bg-gold-primary/10 border border-gold-primary/30 flex items-center justify-center p-2 text-gold-primary">
-                    <VehicleIcon type={user?.vehicleType || 'MOTOTAXI'} className="w-6 h-6 text-gold-primary stroke-[2.2] animate-pulse" />
-                  </div>
-                  <div>
-                    <h3 className="text-xs font-bold text-gold-primary uppercase tracking-wider">
-                      {user?.vehicleType === 'MOTOCAR' ? 'Buscando cargas / fletes...' : user?.vehicleType === 'TAXI_AUTO' ? 'Buscando viajes en auto...' : 'Buscando pasajeros...'}
-                    </h3>
-                    <p className="text-xs text-text-secondary">
-                      Conectado como {user?.vehicleType === 'MOTOCAR' ? 'Motocar' : user?.vehicleType === 'TAXI_AUTO' ? 'Taxi Auto' : 'Mototaxi'} ({user?.motorcycle || 'Estándar'}).
-                    </p>
-                  </div>
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-gold-primary/10 border border-gold-primary/30 flex items-center justify-center p-2 text-gold-primary">
+                  <VehicleIcon type={user?.vehicleType || 'MOTOTAXI'} className="w-6 h-6 text-gold-primary stroke-[2.2] animate-pulse" />
                 </div>
-
-                <button
-                  type="button"
-                  onClick={() => setShowVehicleModal(true)}
-                  className="px-2.5 py-1.5 rounded-xl bg-surface-2 border border-border-custom text-[11px] font-bold text-gold-primary hover:text-white transition active:scale-95"
-                >
-                  Cambiar
-                </button>
+                <div>
+                  <h3 className="text-xs font-bold text-gold-primary uppercase tracking-wider">
+                    {user?.vehicleType === 'MOTOCAR' ? 'Buscando cargas...' : user?.vehicleType === 'TAXI_AUTO' ? 'Buscando viajes en auto...' : 'Buscando viajes...'}
+                  </h3>
+                  <p className="text-xs text-text-secondary">Conectado y listo para recibir pasajeros.</p>
+                </div>
               </div>
             </motion.div>
           )}
@@ -1009,12 +970,6 @@ export const DriverHome = () => {
 
       {/* NEGOTIATION CHAT MODAL */}
       <NegotiationChatModal />
-
-      {/* DRIVER VEHICLE CONFIGURATION MODAL */}
-      <DriverVehicleModal
-        isOpen={showVehicleModal}
-        onClose={() => setShowVehicleModal(false)}
-      />
     </div>
   );
 };

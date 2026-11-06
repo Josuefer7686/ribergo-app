@@ -232,6 +232,30 @@ export const ProfileView = () => {
         {/* Functional Menu Items */}
         <div className="p-2 rounded-3xl bg-surface border border-border-custom space-y-1">
 
+          {/* CAMBIAR TIPO DE VEHÍCULO (EXCLUSIVO CONDUCTOR) */}
+          {user?.role === 'DRIVER' && (
+            <button 
+              onClick={() => {
+                haptics.selection();
+                setShowVehicleModal(true);
+              }}
+              className="w-full p-3.5 rounded-2xl bg-gold-primary/10 hover:bg-gold-primary/15 border border-gold-primary/30 flex items-center justify-between text-xs group transition"
+            >
+              <div className="flex items-center gap-3">
+                <div className="w-8 h-8 rounded-xl bg-gold-primary/20 border border-gold-primary/40 flex items-center justify-center text-gold-primary shrink-0">
+                  <VehicleIcon type={user?.vehicleType || 'MOTOTAXI'} className="w-4 h-4 stroke-[2.2]" />
+                </div>
+                <div className="text-left">
+                  <span className="font-bold text-white block">Cambiar tipo de vehículo</span>
+                  <span className="text-[10px] text-gold-primary font-semibold">
+                    {user?.vehicleType === 'MOTOCAR' ? 'Motocar de Carga' : user?.vehicleType === 'TAXI_AUTO' ? 'Taxi en Automóvil' : 'Mototaxi Normal'} • {user?.motorcycle || 'Estándar'}
+                  </span>
+                </div>
+              </div>
+              <ChevronRight className="w-4 h-4 text-gold-primary group-hover:translate-x-0.5 transition" />
+            </button>
+          )}
+
           <button 
             onClick={() => {
               haptics.selection();
