@@ -14,14 +14,22 @@ import { notifications } from '@/utils/notifications';
 import { usePwa } from '@/utils/pwa';
 import { DriverVehicleModal } from '@/components/modals/DriverVehicleModal';
 import { VehicleIcon } from '@/components/ui/VehicleIcon';
+import { apiService } from '@/services/apiService';
 
 export const ProfileView = () => {
-  const { user, role, setRole, setCurrentView, logout, preferences, setPaymentMethod, toggleNotification, toggleSetting, setShowPwaModal } = useAppStore();
+  const { user, role, setCurrentView, logout, preferences, setPaymentMethod, toggleNotification, toggleSetting, setShowPwaModal } = useAppStore();
   const [notifPermission, setNotifPermission] = useState<string>(() => notifications.getPermission());
   const [showVehicleModal, setShowVehicleModal] = useState(false);
   const { isStandalone } = usePwa();
 
   const isPassenger = role === 'PASSENGER';
+
+  const handleLogout = async () => {
+    haptics.impact();
+    await apiService.logout();
+    logout();
+    setCurrentView('LOGIN');
+  };
 
   // Sync Dark/Light theme with document body
   useEffect(() => {
@@ -73,32 +81,6 @@ export const ProfileView = () => {
           </div>
         </div>
 
-        {/* MODO SWITCHER (CAMBIAR ENTRE PASAJERO Y CONDUCTOR) */}
-        <div className="p-3.5 rounded-2xl bg-surface border border-gold-primary/30 flex items-center justify-between shadow-lg">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-gold-primary/10 border border-gold-primary/30 flex items-center justify-center text-gold-primary">
-              {isPassenger ? <Bike className="w-5 h-5" /> : <User className="w-5 h-5" />}
-            </div>
-            <div>
-              <p className="text-xs font-bold text-white">
-                {isPassenger ? 'Cambiar a Modo Conductor' : 'Cambiar a Modo Pasajero'}
-              </p>
-              <p className="text-[10px] text-text-secondary">
-                {isPassenger ? 'Genera ingresos en tu mototaxi' : 'Pide mototaxis por Riberalta'}
-              </p>
-            </div>
-          </div>
-
-          <button
-            onClick={() => {
-              haptics.heavy();
-              setCurrentView('ROLE_SELECTION');
-            }}
-            className="px-3 py-1.5 rounded-xl bg-gold-primary text-background font-black text-xs hover:bg-gold-light transition shadow-md shadow-gold-primary/20 active:scale-95 whitespace-nowrap"
-          >
-            Cambiar
-          </button>
-        </div>
 
         {/* DRIVER VEHICLE MANAGEMENT CARD (SOLO PARA CONDUCTORES) */}
         {!isPassenger && (
@@ -309,10 +291,7 @@ export const ProfileView = () => {
 
         {/* Logout */}
         <button
-          onClick={() => {
-            haptics.impact();
-            logout();
-          }}
+          onClick={handleLogout}
           className="w-full py-3.5 bg-surface border border-red-500/30 text-red-400 hover:bg-red-500/10 rounded-2xl font-bold text-xs flex items-center justify-center gap-2 transition"
         >
           <LogOut className="w-4 h-4" />
@@ -517,7 +496,7 @@ export const ProfileView = () => {
               <p className="text-[10px] text-text-secondary">Esta acción borrará tu historial de viajes y preferencias de Riberalta.</p>
               <div className="flex gap-2">
                 <button onClick={() => setShowDeleteConfirm(false)} className="flex-1 py-2 rounded-xl bg-surface text-white font-semibold">Cancelar</button>
-                <button onClick={logout} className="flex-1 py-2 rounded-xl bg-red-500 text-white font-bold">Confirmar</button>
+                <button onClick={handleLogout} className="flex-1 py-2 rounded-xl bg-red-500 text-white font-bold">Confirmar</button>
               </div>
             </div>
           )}
@@ -620,37 +599,48 @@ export const ProfileView = () => {
       <IosModal
         isOpen={activeModal === 'DRIVER_REGISTRATION'}
         onClose={() => setActiveModal(null)}
-        title="Inscripción de Conductor Mototaxi"
+        title="Postulación para Conductor"
       >
         <div className="space-y-4 text-xs">
           <div className="p-4 rounded-2xl bg-gold-primary/10 border border-gold-primary/40 space-y-2">
             <div className="flex items-center gap-2 text-gold-primary font-bold">
               <Bike className="w-5 h-5" />
-              <span>Conduce con RiberGO en Riberalta</span>
+              <span>Trabaja con RiberGO en Riberalta</span>
             </div>
-            <p className="text-[11px] text-text-secondary">Genera ingresos en tu propio horario prestando servicio de mototaxi seguro.</p>
+            <p className="text-[11px] text-text-secondary leading-relaxed">
+              Tu cuenta actual está registrada permanentemente como <strong>Pasajero</strong>. Por seguridad de nuestros clientes, los conductores pasan por un proceso de selección estricto y requieren una cuenta de conductor aprobada.
+            </p>
           </div>
 
           <div className="space-y-2">
             <h4 className="font-bold text-white uppercase text-[10px] tracking-wider">Requisitos Obligatorios:</h4>
-            <div className="p-3.5 rounded-2xl bg-surface-2 border border-border-custom space-y-1.5 text-[11px]">
-              <p className="flex items-center gap-2"><Check className="w-4 h-4 text-gold-primary" /> Licencia de conducir vigente</p>
-              <p className="flex items-center gap-2"><Check className="w-4 h-4 text-gold-primary" /> Motocicleta en buen estado (Placa RBT-xxx)</p>
-              <p className="flex items-center gap-2"><Check className="w-4 h-4 text-gold-primary" /> Documento de identidad boliviano</p>
-              <p className="flex items-center gap-2"><Check className="w-4 h-4 text-gold-primary" /> Casco de seguridad para pasajero</p>
+            <div className="p-3.5 rounded-2xl bg-surface-2 border border-border-custom space-y-2 text-[11px]">
+              <p className="flex items-center gap-2"><Check className="w-4 h-4 text-gold-primary shrink-0" /> Cédula de Identidad boliviana vigente</p>
+              <p className="flex items-center gap-2"><Check className="w-4 h-4 text-gold-primary shrink-0" /> Licencia de conducir categoría correspondiente</p>
+              <p className="flex items-center gap-2"><Check className="w-4 h-4 text-gold-primary shrink-0" /> Vehículo registrado (Mototaxi, Auto Taxi o Motocar)</p>
+              <p className="flex items-center gap-2"><Check className="w-4 h-4 text-gold-primary shrink-0" /> Certificado de antecedentes policiales</p>
             </div>
           </div>
 
-          <div className="p-4 rounded-2xl bg-surface border border-border-custom text-center space-y-2">
-            <p className="text-[11px] text-text-secondary">Por seguridad, para conducir debes iniciar sesión con tu cuenta de Conductor verificada.</p>
+          <div className="p-4 rounded-2xl bg-surface border border-border-custom space-y-3">
+            <a
+              href="https://wa.me/59176868110?text=Hola%20RiberGO,%20deseo%20postularme%20como%20conductor%20en%20Riberalta"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="w-full py-3.5 bg-green-500 hover:bg-green-600 text-white font-bold rounded-xl text-xs flex items-center justify-center gap-2 shadow-lg transition"
+            >
+              <MessageCircle className="w-4 h-4" />
+              <span>Postular por WhatsApp con Administración</span>
+            </a>
+
             <button
               onClick={() => {
                 setActiveModal(null);
-                logout();
+                handleLogout();
               }}
-              className="w-full py-3 bg-gold-primary text-background font-black rounded-xl text-xs uppercase shadow-md shadow-gold-primary/20"
+              className="w-full py-2.5 bg-surface-2 hover:bg-surface-3 text-text-secondary hover:text-white font-semibold rounded-xl text-xs transition border border-border-custom"
             >
-              Iniciar sesión como Conductor
+              Cerrar sesión actual
             </button>
           </div>
         </div>

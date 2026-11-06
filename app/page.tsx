@@ -47,11 +47,12 @@ export default function App() {
           const userDoc = await getDoc(doc(db, 'users', firebaseUser.uid));
           if (userDoc.exists()) {
             const profileData = userDoc.data() as any;
-            // Solo auto-iniciar en arranque en frío (SPLASH). Si el usuario está iniciando sesión con Google en LOGIN/REGISTER,
-            // permitimos que el flujo interactivo muestre la selección de rol (Pasajero / Conductor)
             const current = useAppStore.getState().currentView;
             if (current === 'SPLASH') {
-              loginUser(profileData);
+              const cleanPhone = (profileData.phone || '').replace(/[^0-9]/g, '');
+              const hasPhone = cleanPhone.length >= 8 && cleanPhone !== '59170000000';
+              const hasRole = profileData.hasSelectedRole === true || (Boolean(profileData.role) && hasPhone);
+              loginUser(profileData, hasRole ? 'MAIN_APP' : 'ROLE_SELECTION');
             }
           }
         } catch (e) {
@@ -69,7 +70,14 @@ export default function App() {
       const timer = setTimeout(() => {
         const activeUser = useAppStore.getState().user;
         if (activeUser) {
-          setCurrentView('MAIN_APP');
+          const cleanPhone = (activeUser.phone || '').replace(/[^0-9]/g, '');
+          const hasPhone = cleanPhone.length >= 8 && cleanPhone !== '59170000000';
+          const hasRole = activeUser.hasSelectedRole === true || (Boolean(activeUser.role) && hasPhone);
+          if (hasRole) {
+            setCurrentView('MAIN_APP');
+          } else {
+            setCurrentView('ROLE_SELECTION');
+          }
         } else {
           setCurrentView('LOGIN');
         }

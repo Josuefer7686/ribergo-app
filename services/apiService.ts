@@ -623,7 +623,7 @@ export const apiService = {
 
   /**
    * Google Sign-In (Fastest 1-Tap Login)
-   * Retorna el perfil y si es su primer registro (o si le falta ingresar su teléfono)
+   * Retorna el perfil y si es su primer registro (o si le falta ingresar su teléfono o elegir rol)
    */
   async loginWithGoogle(): Promise<{ profile: UserProfile; isFirstTime: boolean }> {
     if (isFirebaseConfigured()) {
@@ -638,8 +638,18 @@ export const apiService = {
         if (userDoc.exists()) {
           const profile = userDoc.data() as UserProfile;
           const cleanPhone = (profile.phone || '').replace(/[^0-9]/g, '');
-          const isFirstTime = !profile.phone || cleanPhone.length < 8 || cleanPhone === '59170000000';
-          return { profile, isFirstTime };
+          const hasPhone = Boolean(profile.phone) && cleanPhone.length >= 8 && cleanPhone !== '59170000000';
+          // Si el usuario ya seleccionó su rol de forma permanente o ya está registrado con rol y teléfono
+          const hasSelectedRole = profile.hasSelectedRole === true || (Boolean(profile.role) && hasPhone);
+          const isFirstTime = !hasPhone || !hasSelectedRole;
+          
+          return { 
+            profile: {
+              ...profile,
+              hasSelectedRole,
+            }, 
+            isFirstTime 
+          };
         }
 
         const newProfile: UserProfile = {
@@ -652,10 +662,12 @@ export const apiService = {
           ratingsCount: 0,
           trips: 0,
           role: 'PASSENGER',
+          hasSelectedRole: false,
         };
 
         await setDoc(userDocRef, {
           ...newProfile,
+          hasSelectedRole: false,
           createdAt: serverTimestamp(),
         });
 
@@ -677,9 +689,23 @@ export const apiService = {
         ratingsCount: 0,
         trips: 0,
         role: 'PASSENGER',
+        hasSelectedRole: false,
       },
       isFirstTime: true,
     };
+  },
+
+  /**
+   * Cerrar sesión en Firebase Auth
+   */
+  async logout(): Promise<void> {
+    if (isFirebaseConfigured()) {
+      try {
+        await signOut(auth);
+      } catch (err) {
+        console.warn('Firebase signOut error:', err);
+      }
+    }
   },
 
   /**

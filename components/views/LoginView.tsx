@@ -18,6 +18,7 @@ export const LoginView = () => {
   const [successTitle, setSuccessTitle] = useState('¡Bienvenido!');
   const [successSubtitle, setSuccessSubtitle] = useState('Sesión iniciada con éxito');
   const [pendingUser, setPendingUser] = useState<UserProfile | null>(null);
+  const [isFirstTimeUser, setIsFirstTimeUser] = useState(false);
 
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
@@ -37,13 +38,22 @@ export const LoginView = () => {
     try {
       const { profile, isFirstTime } = await apiService.loginWithGoogle();
       setPendingUser(profile);
+      setIsFirstTimeUser(isFirstTime);
       setIsLoading(false);
 
       if (isFirstTime) {
-        // Primer registro: pedir número de celular de Bolivia para contacto
-        setShowPhoneModal(true);
+        // Primer registro: verificar si le falta ingresar su teléfono
+        const cleanPhone = (profile.phone || '').replace(/[^0-9]/g, '');
+        if (!profile.phone || cleanPhone.length < 8 || cleanPhone === '59170000000') {
+          setShowPhoneModal(true);
+        } else {
+          // Ya tiene teléfono, falta seleccionar rol
+          setSuccessTitle('¡Bienvenido!');
+          setSuccessSubtitle(`${profile.name}`);
+          setShowSuccess(true);
+        }
       } else {
-        // Usuario recurrente con teléfono ya registrado
+        // Usuario recurrente con teléfono y rol ya registrados
         setSuccessTitle('¡Bienvenido de nuevo!');
         setSuccessSubtitle(`${profile.name}`);
         setShowSuccess(true);
@@ -81,6 +91,7 @@ export const LoginView = () => {
       const updatedProfile: UserProfile = {
         ...pendingUser,
         phone: fullPhone,
+        hasSelectedRole: false,
       };
 
       setPendingUser(updatedProfile);
@@ -101,8 +112,20 @@ export const LoginView = () => {
   // Fin de la animación HUD de éxito
   const handleSuccessFinished = () => {
     if (pendingUser) {
-      loginUser(pendingUser, 'ROLE_SELECTION');
-      setCurrentView('ROLE_SELECTION');
+      const cleanPhone = (pendingUser.phone || '').replace(/[^0-9]/g, '');
+      const hasPhone = cleanPhone.length >= 8 && cleanPhone !== '59170000000';
+      // Solo va a selección de rol si es usuario nuevo y no ha elegido rol permanentemente
+      const needsRoleSelection = isFirstTimeUser || !pendingUser.hasSelectedRole || !hasPhone;
+
+      if (!needsRoleSelection) {
+        // Usuario existente: VA DIRECTO A MAIN_APP sin volver a preguntar rol
+        loginUser(pendingUser, 'MAIN_APP');
+        setCurrentView('MAIN_APP');
+      } else {
+        // Primer registro: va a la pantalla de selección de rol única y permanente
+        loginUser(pendingUser, 'ROLE_SELECTION');
+        setCurrentView('ROLE_SELECTION');
+      }
     }
   };
 

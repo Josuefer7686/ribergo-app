@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useAppStore } from '@/store/useAppStore';
 import { User, Bike, ChevronRight, Sparkles, Shield, AlertCircle } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -16,14 +16,21 @@ export const RoleSelectionView = () => {
   const [errorMsg, setErrorMsg] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  // Si el usuario ya cuenta con rol seleccionado permanentemente, redirigir directo a MAIN_APP
+  useEffect(() => {
+    if (user?.hasSelectedRole) {
+      setCurrentView('MAIN_APP');
+    }
+  }, [user, setCurrentView]);
+
   const handleSelectRole = async (selectedRole: 'PASSENGER' | 'DRIVER') => {
     haptics.heavy();
 
     if (selectedRole === 'PASSENGER') {
       setRole('PASSENGER');
-      updateUserProfile({ role: 'PASSENGER' });
+      updateUserProfile({ role: 'PASSENGER', hasSelectedRole: true });
       if (user?.id) {
-        await apiService.updateUserProfileFirestore(user.id, { role: 'PASSENGER' });
+        await apiService.updateUserProfileFirestore(user.id, { role: 'PASSENGER', hasSelectedRole: true });
       }
       setCurrentView('MAIN_APP');
       return;
@@ -32,9 +39,9 @@ export const RoleSelectionView = () => {
     // Si seleccionó Conductor: verificar si ya tiene moto registrada
     if (user?.motorcycle) {
       setRole('DRIVER');
-      updateUserProfile({ role: 'DRIVER' });
+      updateUserProfile({ role: 'DRIVER', hasSelectedRole: true });
       if (user?.id) {
-        await apiService.updateUserProfileFirestore(user.id, { role: 'DRIVER' });
+        await apiService.updateUserProfileFirestore(user.id, { role: 'DRIVER', hasSelectedRole: true });
       }
       setCurrentView('MAIN_APP');
     } else {
@@ -56,7 +63,9 @@ export const RoleSelectionView = () => {
 
     const updatedData = {
       role: 'DRIVER' as const,
+      hasSelectedRole: true,
       motorcycle: motorcycle.trim(),
+      vehicleType: 'MOTOTAXI' as const,
       verified: true,
       walletBalance: user?.walletBalance ?? 0.00,
       freeTripsRemaining: 5, // 5 viajes de bienvenida sin comisión garantizados al nuevo conductor
@@ -92,7 +101,7 @@ export const RoleSelectionView = () => {
                 ¿Cómo quieres usar <span className="text-white">Riber</span><span className="text-gold-primary">GO</span>?
               </h2>
               <p className="text-xs text-text-secondary">
-                Selecciona tu modo principal. Podrás cambiarlo cuando quieras desde tu perfil.
+                Selecciona el tipo de cuenta para este registro. Por seguridad, la cuenta queda vinculada permanentemente a este rol.
               </p>
             </div>
 

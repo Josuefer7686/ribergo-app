@@ -57,6 +57,7 @@ export type UserProfile = {
   accountNumber?: string; // Digital Card Account No (e.g. RBT-4820-9182)
   hasCompletedDriverTutorial?: boolean;
   freeTripsRemaining?: number; // 5 viajes de regalo sin comisión en su primera bienvenida
+  hasSelectedRole?: boolean; // True si ya seleccionó su rol de manera permanente
 };
 
 export type ServiceType = 'MOTOTAXI' | 'MOTOCAR' | 'TAXI_AUTO' | 'REMOLCADA';
@@ -290,6 +291,8 @@ export const useAppStore = create<AppState>()(
         driverState: 'OFFLINE',
         activeTrip: null,
         assignedDriver: null,
+        selectedDriverId: null,
+        chatMessages: [],
       }),
 
       preferences: {
