@@ -2,27 +2,37 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     
-    // User profile documents
+    // Perfiles de Usuarios (Pasajeros y Conductores)
     match /users/{userId} {
       allow read, write: if true;
     }
 
-    // Solicitudes activas en tiempo real (autodestrucción inmediata al cancelar o finalizar)
+    // Casillero de Ingresos y Métricas del Conductor
+    match /driver_boxes/{driverId} {
+      allow read, write: if true;
+    }
+
+    // Solicitudes de Recarga de Saldo por QR y Bot de Telegram
+    match /wallet_recharges/{rechargeId} {
+      allow read, write: if true;
+    }
+
+    // Configuración del Sistema (Admin Telegram Bot, etc.)
+    match /system_config/{configId} {
+      allow read, write: if true;
+    }
+
+    // Solicitudes activas en tiempo real
     match /active_requests/{requestId} {
       allow read, write, delete: if true;
     }
 
-    // Rides / Solicitudes en tiempo real
+    // Carreras y solicitudes de viaje
     match /rides/{rideId} {
       allow read, write, delete: if true;
     }
 
-    // Historial forense y de seguridad inmutable
-    match /trips_history/{tripId} {
-      allow read, write: if true;
-    }
-
-    // Chat messages inside rides (subcollections 'messages' & 'chat')
+    // Chat en tiempo real durante el viaje (subcolecciones)
     match /rides/{rideId}/messages/{messageId} {
       allow read, write: if true;
     }
@@ -30,17 +40,20 @@ service cloud.firestore {
       allow read, write: if true;
     }
 
-    // Online drivers (live GPS position & availability on map)
+    // Conductores en línea (GPS y disponibilidad en el mapa)
     match /online_drivers/{driverId} {
       allow read, write: if true;
     }
 
-    // Trip history items
+    // Historial forense y de viajes completados
     match /tripsHistory/{tripId} {
-      allow read, create: if true;
+      allow read, write: if true;
+    }
+    match /trips_history/{tripId} {
+      allow read, write: if true;
     }
 
-    // Terminal Interprovincial collections
+    // Terminal Interprovincial (Salidas, Boletos, Expresos y Encomiendas)
     match /terminal_departures/{departureId} {
       allow read, write: if true;
     }
@@ -54,7 +67,7 @@ service cloud.firestore {
       allow read, write: if true;
     }
 
-    // Global catch-all rule for all other collections
+    // Regla comodín para cualquier otra colección actual o futura
     match /{document=**} {
       allow read, write: if true;
     }
