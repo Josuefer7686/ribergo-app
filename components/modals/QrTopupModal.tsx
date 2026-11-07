@@ -10,6 +10,7 @@ import {
 import { motion, AnimatePresence } from 'framer-motion';
 import { haptics } from '@/utils/haptics';
 import { audio } from '@/utils/audio';
+import { notifications } from '@/utils/notifications';
 import { apiService } from '@/services/apiService';
 
 interface QrTopupModalProps {
@@ -19,7 +20,7 @@ interface QrTopupModalProps {
 }
 
 export const QrTopupModal = ({ isOpen, onClose, onSuccess }: QrTopupModalProps) => {
-  const { user, loginUser, topUpWallet } = useAppStore();
+  const { user, loginUser, topUpWallet, setPendingRecharge } = useAppStore();
   const [selectedAmount, setSelectedAmount] = useState<number>(20);
   const [receiptImage, setReceiptImage] = useState<string | null>(null);
   const [receiptFile, setReceiptFile] = useState<File | null>(null);
@@ -157,7 +158,22 @@ export const QrTopupModal = ({ isOpen, onClose, onSuccess }: QrTopupModalProps) 
       if (res.ok && res.rechargeId) {
         setActiveRechargeId(res.rechargeId);
         setRechargeStatus('WAITING_APPROVAL');
-        haptics.notification();
+
+        // iOS Apple Pay style symphony: ascending chime and coordinated haptic vibration
+        audio.receiptSentChime();
+        haptics.iosPaymentProcessing();
+
+        // Register in global store for persistent background tracking
+        setPendingRecharge({
+          id: res.rechargeId,
+          amount: selectedAmount,
+          submittedAtMs: Date.now(),
+        });
+
+        // Request browser push notification permission if default
+        if (notifications.isSupported() && notifications.getPermission() === 'default') {
+          notifications.requestPermission().catch(() => {});
+        }
       } else {
         setErrorMsg(res.error || 'No se pudo enviar la solicitud. Intenta de nuevo.');
       }
@@ -207,54 +223,102 @@ export const QrTopupModal = ({ isOpen, onClose, onSuccess }: QrTopupModalProps) 
             </motion.div>
           )}
 
-          {/* 2. ESPERANDO APROBACIÓN EN TIEMPO REAL */}
+          {/* 2. ESPERANDO APROBACIÓN CON ANIMACIÓN ESTILO IOS */}
           {rechargeStatus === 'WAITING_APPROVAL' && (
             <motion.div
               key="waiting"
-              initial={{ opacity: 0, y: 15 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -15 }}
-              className="p-5 rounded-3xl bg-surface-2/80 border border-gold-primary/40 text-center space-y-4"
+              initial={{ opacity: 0, scale: 0.92, y: 15 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.92, y: -15 }}
+              transition={{ type: 'spring', damping: 25, stiffness: 350 }}
+              className="p-5 rounded-3xl bg-surface-2/90 border border-gold-primary/50 text-center space-y-4 shadow-2xl backdrop-blur-xl"
             >
-              <div className="relative w-16 h-16 mx-auto flex items-center justify-center">
-                <div className="absolute inset-0 rounded-full border-2 border-gold-primary/40 animate-ping" />
-                <div className="w-14 h-14 rounded-full bg-gold-primary/15 border-2 border-gold-primary flex items-center justify-center text-gold-primary">
-                  <Clock className="w-7 h-7 animate-pulse" />
-                </div>
+              {/* Apple Pay Animated SVG Checkmark with Concentric Pulsing Rings */}
+              <div className="relative w-20 h-20 mx-auto flex items-center justify-center">
+                <motion.div
+                  initial={{ scale: 0.8, opacity: 0.3 }}
+                  animate={{ scale: [1, 1.25, 1], opacity: [0.3, 0.7, 0.3] }}
+                  transition={{ duration: 2.2, repeat: Infinity, ease: 'easeInOut' }}
+                  className="absolute inset-0 rounded-full border-2 border-emerald-400/40"
+                />
+                <motion.div
+                  initial={{ scale: 0.6 }}
+                  animate={{ scale: [0.9, 1.1, 0.9] }}
+                  transition={{ duration: 2.2, repeat: Infinity, ease: 'easeInOut', delay: 0.3 }}
+                  className="absolute inset-2 rounded-full bg-emerald-500/10 border border-emerald-400/30"
+                />
+                <motion.div
+                  initial={{ scale: 0, rotate: -30 }}
+                  animate={{ scale: 1, rotate: 0 }}
+                  transition={{ type: 'spring', damping: 18, stiffness: 400, delay: 0.1 }}
+                  className="w-14 h-14 rounded-full bg-gradient-to-tr from-emerald-500/30 to-gold-primary/30 border-2 border-emerald-400 flex items-center justify-center text-emerald-400 shadow-xl shadow-emerald-500/30 z-10"
+                >
+                  <svg
+                    className="w-8 h-8 stroke-emerald-400"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    strokeWidth="3.5"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <motion.path
+                      initial={{ pathLength: 0 }}
+                      animate={{ pathLength: 1 }}
+                      transition={{ duration: 0.5, delay: 0.25, ease: 'easeOut' }}
+                      d="M20 6L9 17l-5-5"
+                    />
+                  </svg>
+                </motion.div>
               </div>
 
               <div className="space-y-1.5">
-                <h3 className="text-base font-black text-white">Comprobante en Verificación</h3>
-                <p className="text-xs text-text-secondary leading-relaxed px-2">
-                  Tu comprobante de <strong className="text-gold-primary">{selectedAmount} BOB</strong> fue enviado al administrador. En cuanto se verifique el ingreso en Yasta / Al Toque, tu saldo se liberará en esta pantalla automáticamente.
+                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 text-[11px] font-black uppercase tracking-wider">
+                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
+                  <span>Comprobante Recibido con Éxito</span>
+                </span>
+                <h3 className="text-lg font-black text-white pt-1">Pago en Verificación</h3>
+                <p className="text-xs text-text-secondary leading-relaxed px-1">
+                  Tu comprobante de <strong className="text-gold-primary font-bold">{selectedAmount} BOB</strong> fue enviado a administración. Recibirás una alerta arriba en tu pantalla y en tus mensajes apenas sea verificado.
                 </p>
               </div>
 
-              <div className="p-3 rounded-2xl bg-surface border border-border-custom text-left text-xs space-y-1">
-                <p className="text-text-secondary text-[11px]"><span className="font-bold text-white">Código solicitud:</span> {activeRechargeId}</p>
-                <p className="text-text-secondary text-[11px]"><span className="font-bold text-white">Monto:</span> {selectedAmount} BOB</p>
-                <p className="text-text-secondary text-[11px]"><span className="font-bold text-white">Estado:</span> <span className="text-amber-400 font-bold">Pendiente de Aprobación</span></p>
+              <div className="p-3.5 rounded-2xl bg-surface/90 border border-border-custom text-left text-xs space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-text-secondary text-[11px]">Código de solicitud:</span>
+                  <span className="font-mono text-white text-[11px] font-bold">{activeRechargeId}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-text-secondary text-[11px]">Monto solicitado:</span>
+                  <span className="text-gold-primary font-black text-xs">+{selectedAmount} BOB</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-text-secondary text-[11px]">Estado actual:</span>
+                  <span className="px-2 py-0.5 rounded-md bg-amber-400/20 text-amber-400 border border-amber-400/30 text-[10px] font-black uppercase">
+                    En Revisión
+                  </span>
+                </div>
               </div>
 
-              {/* Botón opcional de WhatsApp */}
+              {/* Botones de acción */}
               <div className="space-y-2 pt-1">
+                <button
+                  type="button"
+                  onClick={handleClose}
+                  className="w-full py-3 rounded-2xl bg-gold-primary hover:bg-gold-light text-background font-black text-xs flex items-center justify-center gap-2 shadow-lg shadow-gold-primary/25 active:scale-[0.98] transition"
+                >
+                  <Check className="w-4 h-4 stroke-[3]" />
+                  <span>Continuar en la App (Se notificará arriba)</span>
+                </button>
+
                 <a
                   href={`https://wa.me/59176868110?text=Hola%20Administrador,%20acabo%20de%20subir%20mi%20comprobante%20de%20recarga%20de%20${selectedAmount}%20BOB%20en%20RiberGO.%20Mi%20ID%20es%20${driverId}%20y%20código%20${activeRechargeId}`}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="w-full py-2.5 rounded-xl bg-green-500/15 hover:bg-green-500/25 border border-green-500/40 text-green-400 text-xs font-bold flex items-center justify-center gap-2 transition"
+                  className="w-full py-2.5 rounded-xl bg-surface hover:bg-surface-2 border border-border-custom text-text-secondary hover:text-white text-xs font-bold flex items-center justify-center gap-2 transition"
                 >
-                  <MessageCircle className="w-4 h-4" />
+                  <MessageCircle className="w-4 h-4 text-emerald-400" />
                   <span>Avisar también por WhatsApp</span>
                 </a>
-
-                <button
-                  type="button"
-                  onClick={handleClose}
-                  className="w-full py-2.5 rounded-xl bg-surface text-xs font-bold text-text-secondary hover:text-white transition"
-                >
-                  Cerrar ventana (se acreditará de fondo)
-                </button>
               </div>
             </motion.div>
           )}

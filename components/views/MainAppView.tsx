@@ -10,13 +10,16 @@ import { TripsView } from '@/components/views/TripsView';
 import { MessagesView } from '@/components/views/MessagesView';
 import { IncomeView } from '@/components/views/IncomeView';
 import { IosMessageToast, ToastMessageData } from '@/components/shared/IosMessageToast';
+import { IosDynamicIslandNotification } from '@/components/shared/IosDynamicIslandNotification';
 import { IosLocationPermissionModal } from '@/components/modals/IosLocationPermissionModal';
 import { useAutoLocation } from '@/hooks/useAutoLocation';
+import { useWalletNotificationListener } from '@/hooks/useWalletNotificationListener';
 import { apiService } from '@/services/apiService';
 
 export function MainAppView() {
   const { role, activeTab, setActiveTab, activeTrip, assignedDriver, passengerState, driverState } = useAppStore();
   const [activeToast, setActiveToast] = useState<ToastMessageData | null>(null);
+  const { activeBanner, handleCloseBanner } = useWalletNotificationListener();
   const lastProcessedMsgId = useRef<string | null>(null);
 
   const activeTripRef = useRef(activeTrip);
@@ -97,6 +100,13 @@ export function MainAppView() {
 
   return (
     <div className="flex flex-col h-full w-full relative overflow-hidden bg-background">
+      {/* Floating Top iOS Dynamic Island for Wallet & Real-time Alerts */}
+      <IosDynamicIslandNotification
+        banner={activeBanner}
+        onClose={handleCloseBanner}
+        onAction={() => setActiveTab('INCOME')}
+      />
+
       {/* Floating iOS 18 Dynamic Island Message Toast Banner */}
       <IosMessageToast
         toast={!rideId || isInsideChat ? null : activeToast}

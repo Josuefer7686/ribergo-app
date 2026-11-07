@@ -79,4 +79,20 @@ export const haptics = {
   countdownTick: () => {
     triggerVibrate(15);
   },
+
+  /**
+   * Apple Pay style rhythmic crescendo when receipt is submitted:
+   * Micro-tap -> pause -> confirmation tap -> double crisp lock
+   */
+  iosPaymentProcessing: () => {
+    triggerVibrate([20, 40, 25, 45, 60]);
+  },
+
+  /**
+   * Triumphant Wallet Approval melody vibration pattern:
+   * Celebratory multi-frequency rhythm
+   */
+  walletApprovalSuccess: () => {
+    triggerVibrate([35, 50, 45, 50, 60, 40, 75]);
+  },
 };

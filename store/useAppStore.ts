@@ -64,6 +64,25 @@ export type ServiceType = 'MOTOTAXI' | 'MOTOCAR' | 'TAXI_AUTO' | 'REMOLCADA';
 export type PaymentMethodType = 'CASH' | 'QR';
 export type PaymentStatusType = 'PENDING' | 'WAITING_DRIVER_CONFIRM' | 'CONFIRMED';
 
+export interface PendingRechargeState {
+  id: string;
+  amount: number;
+  submittedAtMs: number;
+}
+
+export interface WalletNotificationItem {
+  id: string;
+  title: string;
+  message: string;
+  amount: number;
+  newBalance: number;
+  date: string;
+  time: string;
+  rechargeId: string;
+  read: boolean;
+  status: 'APPROVED' | 'REJECTED';
+}
+
 export interface ActiveTripInfo {
   id: string;
   pickup: LocationPoint;
@@ -253,6 +272,14 @@ interface AppState {
   decrementFreeTrips: () => void;
   updateUserProfile: (data: Partial<UserProfile>) => void;
 
+  // Wallet Recharge Notifications & Background Tracking
+  pendingRecharge: PendingRechargeState | null;
+  setPendingRecharge: (recharge: PendingRechargeState | null) => void;
+  walletNotifications: WalletNotificationItem[];
+  addWalletNotification: (notif: WalletNotificationItem) => void;
+  markWalletNotificationRead: (id: string) => void;
+  clearWalletNotifications: () => void;
+
   // Reset current ride
   resetRide: () => void;
 }
@@ -407,6 +434,18 @@ export const useAppStore = create<AppState>()(
         return { user: { ...state.user, freeTripsRemaining: remaining } };
       }),
 
+      // Wallet Recharge Notifications & Tracking
+      pendingRecharge: null,
+      setPendingRecharge: (recharge) => set({ pendingRecharge: recharge }),
+      walletNotifications: [],
+      addWalletNotification: (notif) => set((state) => ({
+        walletNotifications: [notif, ...state.walletNotifications.filter((n) => n.id !== notif.id)]
+      })),
+      markWalletNotificationRead: (id) => set((state) => ({
+        walletNotifications: state.walletNotifications.map((n) => n.id === id ? { ...n, read: true } : n)
+      })),
+      clearWalletNotifications: () => set({ walletNotifications: [] }),
+
       resetRide: () => set({
         passengerState: 'IDLE',
         driverState: get().driverState === 'OFFLINE' ? 'OFFLINE' : 'ONLINE',
@@ -427,6 +466,8 @@ export const useAppStore = create<AppState>()(
         currentView: state.user ? (state.currentView === 'SPLASH' ? 'MAIN_APP' : state.currentView) : state.currentView,
         preferences: state.preferences,
         tripsHistory: state.tripsHistory,
+        pendingRecharge: state.pendingRecharge,
+        walletNotifications: state.walletNotifications,
       }),
     }
   )

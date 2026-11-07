@@ -2,7 +2,10 @@
 
 import { useState, useRef, useEffect } from 'react';
 import { useAppStore } from '@/store/useAppStore';
-import { Send, CheckCheck, MessageSquare, ChevronRight, ArrowLeft, Bike, Sparkles } from 'lucide-react';
+import { 
+  Send, CheckCheck, MessageSquare, ChevronRight, ArrowLeft, Bike, Sparkles, 
+  Wallet, CheckCircle2, ShieldCheck, Clock, AlertTriangle, MessageCircle, ExternalLink 
+} from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { haptics } from '@/utils/haptics';
 import { audio } from '@/utils/audio';
@@ -16,9 +19,13 @@ const PRESET_MESSAGES = [
 ];
 
 export const MessagesView = () => {
-  const { chatMessages, setChatMessages, activeTrip, assignedDriver, tripsHistory, role } = useAppStore();
+  const { 
+    chatMessages, setChatMessages, activeTrip, assignedDriver, tripsHistory, 
+    role, walletNotifications, markWalletNotificationRead, setActiveTab 
+  } = useAppStore();
   const [inputMessage, setInputMessage] = useState('');
   const [selectedChatId, setSelectedChatId] = useState<string | null>(null);
+  const [isWalletChatOpen, setIsWalletChatOpen] = useState(false);
   const [isInputFocused, setIsInputFocused] = useState(false);
   const [viewportHeight, setViewportHeight] = useState<number | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -101,7 +108,132 @@ export const MessagesView = () => {
     setTimeout(() => scrollToBottom(), 100);
   };
 
-  // If user is inside a specific Chat Room
+  // If user is inside the official Wallet & Finance Chat Room
+  if (isWalletChatOpen) {
+    return (
+      <div 
+        className="w-full flex flex-col justify-between bg-background text-white relative overflow-hidden transition-all duration-200"
+        style={{ height: viewportHeight ? `${viewportHeight}px` : '100dvh' }}
+      >
+        {/* Header */}
+        <div className="shrink-0 pt-safe px-4 py-3 bg-surface/90 border-b border-border-custom backdrop-blur-md z-20 flex items-center gap-3">
+          <button
+            onClick={() => {
+              haptics.selection();
+              setIsWalletChatOpen(false);
+            }}
+            className="p-2 rounded-xl bg-surface-2 hover:bg-surface text-text-secondary hover:text-white transition active:scale-95"
+          >
+            <ArrowLeft className="w-5 h-5" />
+          </button>
+
+          <div className="relative">
+            <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-gold-primary to-amber-500 flex items-center justify-center text-background shadow-lg shadow-gold-primary/20">
+              <Wallet className="w-5 h-5 stroke-[2.5]" />
+            </div>
+            <div className="w-3.5 h-3.5 rounded-full bg-emerald-400 border-2 border-background absolute -bottom-0.5 -right-0.5" />
+          </div>
+          
+          <div className="flex-1">
+            <div className="flex items-center gap-1.5">
+              <h3 className="text-sm font-bold text-white">Billetera & Finanzas RiberGO</h3>
+              <ShieldCheck className="w-4 h-4 text-gold-primary" />
+            </div>
+            <p className="text-[11px] text-gold-primary font-semibold flex items-center gap-1">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+              <span>Canal Oficial de Recargas • Riberalta</span>
+            </p>
+          </div>
+        </div>
+
+        {/* Messages Scroll Area */}
+        <div className="flex-1 p-4 overflow-y-auto no-scrollbar space-y-3 relative z-10">
+          {/* Welcome Intro Bubble */}
+          <div className="p-4 rounded-3xl bg-surface border border-border-custom text-xs space-y-2">
+            <div className="flex items-center gap-2 text-gold-primary font-bold">
+              <Sparkles className="w-4 h-4" />
+              <span>Centro de Notificaciones de Saldo</span>
+            </div>
+            <p className="text-text-secondary leading-relaxed">
+              👋 ¡Hola! En este canal recibirás en tiempo real todas las confirmaciones cuando cargues saldo por QR (Yasta / Al Toque) o cuando administración verifique tus pagos.
+            </p>
+          </div>
+
+          {/* List of Wallet Notifications */}
+          {walletNotifications.length === 0 ? (
+            <div className="p-8 text-center bg-surface-2/40 border border-border-custom rounded-3xl space-y-2 my-4">
+              <Wallet className="w-8 h-8 mx-auto text-gold-primary opacity-60" />
+              <p className="text-xs font-bold text-white">Sin recargas registradas aún</p>
+              <p className="text-[11px] text-text-secondary max-w-[240px] mx-auto">
+                Cuando subas tu comprobante de QR, verás aquí el estado y confirmación inmediata.
+              </p>
+            </div>
+          ) : (
+            walletNotifications.map((notif) => (
+              <motion.div
+                key={notif.id}
+                initial={{ opacity: 0, y: 10, scale: 0.98 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                className={`p-4 rounded-3xl border text-xs space-y-2.5 shadow-lg ${
+                  notif.status === 'APPROVED'
+                    ? 'bg-surface border-emerald-500/40 shadow-emerald-500/10'
+                    : 'bg-surface border-rose-500/40 shadow-rose-500/10'
+                }`}
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <span
+                    className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider ${
+                      notif.status === 'APPROVED'
+                        ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                        : 'bg-rose-500/20 text-rose-400 border border-rose-500/30'
+                    }`}
+                  >
+                    {notif.status === 'APPROVED' ? (
+                      <CheckCircle2 className="w-3.5 h-3.5" />
+                    ) : (
+                      <AlertTriangle className="w-3.5 h-3.5" />
+                    )}
+                    <span>{notif.status === 'APPROVED' ? 'Aprobado con Éxito' : 'Rechazado'}</span>
+                  </span>
+                  <span className="text-[10px] text-text-secondary font-medium">
+                    {notif.date} • {notif.time}
+                  </span>
+                </div>
+
+                <div className="space-y-1">
+                  <h4 className="text-sm font-black text-white">{notif.title}</h4>
+                  <p className="text-text-secondary text-xs leading-relaxed">{notif.message}</p>
+                </div>
+
+                <div className="p-2.5 rounded-2xl bg-surface-2 border border-border-custom text-[11px] flex items-center justify-between">
+                  <span className="text-text-secondary">Código comprobante:</span>
+                  <span className="font-mono text-white font-bold">{notif.rechargeId}</span>
+                </div>
+              </motion.div>
+            ))
+          )}
+        </div>
+
+        {/* Footer Actions */}
+        <div className="p-4 bg-surface/90 border-t border-border-custom backdrop-blur-md space-y-2">
+          <button
+            type="button"
+            onClick={() => {
+              haptics.heavy();
+              setIsWalletChatOpen(false);
+              setActiveTab('INCOME');
+            }}
+            className="w-full py-3 rounded-2xl bg-gold-primary hover:bg-gold-light text-background font-black text-xs flex items-center justify-center gap-2 shadow-lg shadow-gold-primary/25 active:scale-[0.98] transition"
+          >
+            <Wallet className="w-4 h-4 stroke-[2.5]" />
+            <span>Ir a Billetera / Nueva Recarga QR</span>
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // If user is inside a specific Ride Chat Room
   if (effectiveChatId && (activeTrip || tripsHistory.some(t => t.id === effectiveChatId))) {
     return (
       <div 
@@ -279,6 +411,56 @@ export const MessagesView = () => {
           <div className="w-10 h-10 rounded-2xl bg-surface-2 border border-border-custom flex items-center justify-center text-gold-primary">
             <MessageSquare className="w-5 h-5" />
           </div>
+        </div>
+
+        {/* PINNED OFFICIAL WALLET CHANNEL CARD */}
+        <div className="space-y-2">
+          <div className="flex items-center justify-between">
+            <h3 className="text-xs font-bold text-gold-primary uppercase tracking-wider flex items-center gap-1.5">
+              <Sparkles className="w-3.5 h-3.5" />
+              <span>Canal Oficial de Finanzas</span>
+            </h3>
+            {walletNotifications.filter((n) => !n.read).length > 0 && (
+              <span className="px-2 py-0.5 rounded-full bg-gold-primary text-background text-[10px] font-black uppercase shadow-md shadow-gold-primary/30 animate-pulse">
+                {walletNotifications.filter((n) => !n.read).length} nuevo
+              </span>
+            )}
+          </div>
+
+          <button
+            onClick={() => {
+              haptics.selection();
+              walletNotifications.forEach((n) => markWalletNotificationRead(n.id));
+              setIsWalletChatOpen(true);
+            }}
+            className="w-full p-4 rounded-3xl bg-surface hover:bg-surface-2 border border-gold-primary/40 text-left flex items-center justify-between transition shadow-xl group active:scale-[0.99]"
+          >
+            <div className="flex items-center gap-3.5">
+              <div className="relative">
+                <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-gold-primary to-amber-500 flex items-center justify-center text-background shadow-lg shadow-gold-primary/20 group-hover:scale-105 transition">
+                  <Wallet className="w-6 h-6 stroke-[2.5]" />
+                </div>
+                <div className="w-3.5 h-3.5 rounded-full bg-emerald-400 border-2 border-background absolute -bottom-0.5 -right-0.5 animate-pulse" />
+              </div>
+              <div>
+                <div className="flex items-center gap-1.5">
+                  <h4 className="text-sm font-bold text-white">Billetera & Finanzas</h4>
+                  <ShieldCheck className="w-4 h-4 text-gold-primary" />
+                </div>
+                <p className="text-xs text-text-secondary font-medium mt-0.5 truncate max-w-[200px]">
+                  {walletNotifications.length > 0
+                    ? walletNotifications[0].title + ': ' + walletNotifications[0].message
+                    : 'Avisos oficiales de recarga por QR y saldo'}
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] text-text-secondary font-bold">
+                {walletNotifications.length > 0 ? walletNotifications[0].time : 'Oficial'}
+              </span>
+              <ChevronRight className="w-5 h-5 text-gold-primary group-hover:translate-x-1 transition" />
+            </div>
+          </button>
         </div>
 
         {/* ACTIVE TRIP CHAT CARD */}

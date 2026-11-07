@@ -312,6 +312,64 @@ class AudioSynthesizer {
   tabClick() {
     this.keyTick();
   }
+
+  /**
+   * iOS / Apple Pay style receipt submitted confirmation sound.
+   * Ascending harmonious chime (C5 -> E5 -> G5) with soft bell decay.
+   */
+  receiptSentChime() {
+    const ctx = this.getContext();
+    if (!ctx) return;
+    const now = ctx.currentTime;
+    const notes = [523.25, 659.25, 783.99]; // C5, E5, G5
+
+    notes.forEach((freq, i) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(freq, now + i * 0.08);
+      gain.gain.setValueAtTime(0.35, now + i * 0.08);
+      gain.gain.exponentialRampToValueAtTime(0.005, now + i * 0.08 + 0.35);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(now + i * 0.08);
+      osc.stop(now + i * 0.08 + 0.35);
+    });
+  }
+
+  /**
+   * Celebratory crystal bell for Wallet Recharge Approval.
+   * Dual bright ringing chime (1046.5Hz C6 -> 1567.98Hz G6).
+   */
+  walletApprovedChime() {
+    const ctx = this.getContext();
+    if (!ctx) return;
+    const now = ctx.currentTime;
+
+    // First bright bell
+    const osc1 = ctx.createOscillator();
+    const gain1 = ctx.createGain();
+    osc1.type = 'triangle';
+    osc1.frequency.setValueAtTime(1046.5, now);
+    gain1.gain.setValueAtTime(0.4, now);
+    gain1.gain.exponentialRampToValueAtTime(0.005, now + 0.5);
+    osc1.connect(gain1);
+    gain1.connect(ctx.destination);
+    osc1.start(now);
+    osc1.stop(now + 0.5);
+
+    // Second celebratory high bell
+    const osc2 = ctx.createOscillator();
+    const gain2 = ctx.createGain();
+    osc2.type = 'sine';
+    osc2.frequency.setValueAtTime(1567.98, now + 0.15);
+    gain2.gain.setValueAtTime(0.5, now + 0.15);
+    gain2.gain.exponentialRampToValueAtTime(0.005, now + 0.7);
+    osc2.connect(gain2);
+    gain2.connect(ctx.destination);
+    osc2.start(now + 0.15);
+    osc2.stop(now + 0.7);
+  }
 }
 
 export const audio = new AudioSynthesizer();
