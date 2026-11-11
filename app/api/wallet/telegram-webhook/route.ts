@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { db } from '@/lib/firebase';
-import { doc, runTransaction, increment, serverTimestamp } from 'firebase/firestore';
+import { FieldValue } from 'firebase-admin/firestore';
+import { getAdminDb } from '@/lib/firebaseAdmin';
 import {
   TELEGRAM_TOKEN,
   TELEGRAM_ADMIN_CHAT_ID,
@@ -28,6 +28,12 @@ export async function POST(req: NextRequest) {
   const received = req.headers.get('x-telegram-bot-api-secret-token') || '';
   if (!safeEqual(received, TELEGRAM_WEBHOOK_SECRET)) {
     return NextResponse.json({ ok: false }, { status: 401 });
+  }
+
+  const adminDb = getAdminDb();
+  if (!adminDb) {
+    console.error('Webhook sin Firebase Admin: falta FIREBASE_SERVICE_ACCOUNT_B64');
+    return NextResponse.json({ ok: false, error: 'not_configured' }, { status: 503 });
   }
 
   try {
@@ -77,15 +83,15 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ ok: true });
       }
 
-      const rechargeRef = doc(db, 'wallet_recharges', rechargeId);
+      const rechargeRef = adminDb.collection('wallet_recharges').doc(rechargeId);
       const approving = action === 'approve';
       let amount = 0;
 
       try {
-        await runTransaction(db, async (tx) => {
+        await adminDb.runTransaction(async (tx) => {
           const snap = await tx.get(rechargeRef);
-          if (!snap.exists()) throw new Error('NOT_FOUND');
-          const recharge = snap.data();
+          if (!snap.exists) throw new Error('NOT_FOUND');
+          const recharge = snap.data() || {};
           if (recharge.status !== 'PENDING') throw new Error(`ALREADY:${recharge.status}`);
 
           amount = Number(recharge.amount);
@@ -98,19 +104,19 @@ export async function POST(req: NextRequest) {
             tx.update(rechargeRef, {
               status: 'APPROVED',
               approvedAtMs: Date.now(),
-              approvedAt: serverTimestamp(),
+              approvedAt: FieldValue.serverTimestamp(),
               approvedBy: fromId,
             });
             tx.set(
-              doc(db, 'users', driverId),
-              { walletBalance: increment(amount), updatedAt: serverTimestamp() },
+              adminDb.collection('users').doc(driverId),
+              { walletBalance: FieldValue.increment(amount), updatedAt: FieldValue.serverTimestamp() },
               { merge: true }
             );
           } else {
             tx.update(rechargeRef, {
               status: 'REJECTED',
               rejectedAtMs: Date.now(),
-              rejectedAt: serverTimestamp(),
+              rejectedAt: FieldValue.serverTimestamp(),
               rejectedBy: fromId,
             });
           }

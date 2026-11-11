@@ -271,6 +271,7 @@ Colecciones de viajes interprovinciales y paquetería entre Riberalta y Guayaram
 | **Rama principal** | `main` |
 | **Telegram Bot Token** | `TELEGRAM_BOT_TOKEN` (solo en Vercel y `.env.local`; **nunca** en el código ni en este archivo) |
 | **Telegram Admin Chat ID** | `TELEGRAM_ADMIN_CHAT_ID` (variable de entorno; solo este usuario puede aprobar recargas) |
+| **Firebase Admin** | `FIREBASE_SERVICE_ACCOUNT_B64` (JSON de cuenta de servicio en base64; solo servidor) |
 | **Telegram Webhook Secret** | `TELEGRAM_WEBHOOK_SECRET` (cadena larga aleatoria; se registra con `secret_token` en `setWebhook`) |
 | **Webhook URL** | `https://ribergoo.vercel.app/api/wallet/telegram-webhook` |
 | **Firebase Project ID** | `ribergo-app` |
@@ -332,5 +333,7 @@ curl -s "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/setWebhook" \
 - **El webhook exige** la cabecera `X-Telegram-Bot-Api-Secret-Token` y que quien pulse el botón sea `TELEGRAM_ADMIN_CHAT_ID`. Monto y conductor salen del documento `wallet_recharges`, jamás del texto del mensaje.
 - **`/api/wallet/request-topup`** valida montos permitidos (10/20/50/100 BOB), tamaño e imagen, y lee el saldo del servidor.
 - **Comisiones** (`deductTripCommission`, `decrementDriverFreeTrips`) usan transacciones sobre el saldo real.
-- **PENDIENTE (alto riesgo):** `firestore.rules` sigue abierto (`allow read, write: if true`). Cerrarlo exige mover las escrituras de dinero a un servidor con `firebase-admin` y usar Firebase Auth en las reglas. Mientras tanto, cualquiera con el ID de proyecto puede editar saldos directamente.
+- **Reglas de Firestore (`firestore.rules`) cerradas.** Todo exige sesión; sin regla comodín. El saldo (`walletBalance`) y los viajes de regalo solo pueden **bajar** desde el cliente; subirlos es exclusivo del servidor. `wallet_recharges` y `system_config` son solo-servidor. El rol se elige una vez. Los viajes/chat solo los editan sus participantes. Hay 24 pruebas: `npm run test:rules` (necesita Java).
+- **Firebase Admin (servidor):** `lib/firebaseAdmin.ts` lee la credencial de `FIREBASE_SERVICE_ACCOUNT_B64` (JSON de la cuenta de servicio en base64). Lo usan el webhook y `request-topup`, porque el Admin SDK ignora las reglas. Sin esa variable ambas rutas responden 503.
+- **Riesgos que quedan (aceptados por ahora):** la comisión por viaje y las calificaciones se escriben desde el cliente (un conductor tramposo podría no descontarse la comisión o un pasajero manipular una calificación). Para blindarlo hay que moverlos a rutas de servidor.
 - Nunca subas tokens, claves ni `.env*` al repositorio. Si se filtra un token, revócalo en @BotFather (`/revoke`).

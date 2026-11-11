@@ -1984,7 +1984,8 @@ export const apiService = {
         const ref = doc(db, 'users', driverId);
         newBalance = await runTransaction(db, async (tx) => {
           const snap = await tx.get(ref);
-          const serverBalance = snap.exists() ? Number(snap.data()?.walletBalance) || 0 : 0;
+          const raw = snap.exists() ? snap.data()?.walletBalance : undefined;
+          const serverBalance = typeof raw === 'number' ? raw : (currentBalance || 0);
           const next = Math.max(0, serverBalance - commissionFee);
           tx.set(ref, { walletBalance: next, updatedAt: serverTimestamp() }, { merge: true });
           return next;
@@ -2006,7 +2007,8 @@ export const apiService = {
         const ref = doc(db, 'users', driverId);
         newRemaining = await runTransaction(db, async (tx) => {
           const snap = await tx.get(ref);
-          const serverRemaining = snap.exists() ? Number(snap.data()?.freeTripsRemaining) || 0 : 0;
+          const raw = snap.exists() ? snap.data()?.freeTripsRemaining : undefined;
+          const serverRemaining = typeof raw === 'number' ? raw : (currentFreeTrips || 0);
           const next = Math.max(0, serverRemaining - 1);
           tx.set(ref, { freeTripsRemaining: next, updatedAt: serverTimestamp() }, { merge: true });
           return next;
@@ -2319,6 +2321,7 @@ export const apiService = {
     const newEncomienda: TerminalEncomienda = {
       id: encomiendaId,
       trackingCode,
+      senderId: user.id,
       senderName: user.name,
       senderPhone: user.phone,
       recipientName: recipientName || 'Destinatario',

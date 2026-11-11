@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { db } from '@/lib/firebase';
-import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
+import { FieldValue } from 'firebase-admin/firestore';
+import { getAdminDb } from '@/lib/firebaseAdmin';
 import {
   TELEGRAM_TOKEN,
   TELEGRAM_ADMIN_CHAT_ID,
@@ -15,6 +15,15 @@ export async function POST(req: NextRequest) {
   try {
     if (!TELEGRAM_TOKEN || !TELEGRAM_ADMIN_CHAT_ID) {
       console.error('request-topup sin configurar: falta TELEGRAM_BOT_TOKEN o TELEGRAM_ADMIN_CHAT_ID');
+      return NextResponse.json(
+        { ok: false, error: 'El servicio de recargas no está disponible por ahora.' },
+        { status: 503 }
+      );
+    }
+
+    const adminDb = getAdminDb();
+    if (!adminDb) {
+      console.error('request-topup sin Firebase Admin: falta FIREBASE_SERVICE_ACCOUNT_B64');
       return NextResponse.json(
         { ok: false, error: 'El servicio de recargas no está disponible por ahora.' },
         { status: 503 }
@@ -48,8 +57,8 @@ export async function POST(req: NextRequest) {
     // El saldo actual lo lee el servidor; nunca se confía en el que envía el cliente.
     let currentBalance = 0;
     try {
-      const userSnap = await getDoc(doc(db, 'users', driverId));
-      if (userSnap.exists()) currentBalance = Number(userSnap.data()?.walletBalance) || 0;
+      const userSnap = await adminDb.collection('users').doc(driverId).get();
+      if (userSnap.exists) currentBalance = Number(userSnap.data()?.walletBalance) || 0;
     } catch (e) {
       console.warn('No se pudo leer el saldo del conductor:', e);
     }
@@ -68,7 +77,7 @@ export async function POST(req: NextRequest) {
 
     // 1. La solicitud DEBE quedar guardada: sin ella el admin no podría aprobarla.
     try {
-      await setDoc(doc(db, 'wallet_recharges', rechargeId), {
+      await adminDb.collection('wallet_recharges').doc(rechargeId).set({
         id: rechargeId,
         driverId,
         driverName,
@@ -78,7 +87,7 @@ export async function POST(req: NextRequest) {
         currentBalance,
         status: 'PENDING',
         createdAtMs: nowMs,
-        createdAt: serverTimestamp(),
+        createdAt: FieldValue.serverTimestamp(),
         formattedDate: dateStr,
       });
     } catch (fsErr) {
@@ -133,11 +142,10 @@ export async function POST(req: NextRequest) {
     if (!delivered) {
       // El admin nunca lo verá: se marca como fallida para que el conductor pueda reintentar.
       try {
-        await setDoc(
-          doc(db, 'wallet_recharges', rechargeId),
-          { status: 'FAILED', failedAtMs: Date.now() },
-          { merge: true }
-        );
+        await adminDb
+          .collection('wallet_recharges')
+          .doc(rechargeId)
+          .set({ status: 'FAILED', failedAtMs: Date.now() }, { merge: true });
       } catch {}
       return NextResponse.json(
         { ok: false, error: 'No pudimos enviar tu comprobante a administración. Intenta de nuevo.' },

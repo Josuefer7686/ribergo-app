@@ -1,75 +1,162 @@
 rules_version = '2';
+
+/**
+ * Reglas de seguridad de RiberGO.
+ *
+ * Principios:
+ *  - Todo requiere sesión iniciada (Firebase Auth). No existe regla comodín.
+ *  - El DINERO no se toca desde el cliente: el saldo solo SUBE desde el servidor
+ *    (Admin SDK, que ignora estas reglas) al aprobar una recarga por Telegram.
+ *    Un conductor solo puede BAJAR su propio saldo (comisión por viaje).
+ *  - Cada quien escribe lo suyo: perfil, ubicación, viajes y mensajes propios.
+ *  - Las recargas y la configuración del sistema las maneja solo el servidor.
+ */
 service cloud.firestore {
   match /databases/{database}/documents {
-    
-    // Perfiles de Usuarios (Pasajeros y Conductores)
+
+    function signedIn() {
+      return request.auth != null;
+    }
+    function isSelf(uid) {
+      return signedIn() && request.auth.uid == uid;
+    }
+    // Campos que cambian en esta escritura (en una creación, todos los enviados)
+    function changed() {
+      return request.resource.data.diff(resource.data).affectedKeys();
+    }
+
+    // ───────── Perfiles ─────────
     match /users/{userId} {
-      allow read, write: if true;
+      allow read: if signedIn();
+
+      // Crear: solo tu propio perfil, sin saldo inventado ni viajes de regalo de más.
+      allow create: if isSelf(userId)
+        && request.resource.data.get('walletBalance', 0) == 0
+        && request.resource.data.get('freeTripsRemaining', 0) <= 5;
+
+      allow update: if
+        // Tu propio perfil, con estas salvedades:
+        (isSelf(userId)
+          // el saldo solo puede bajar (comisión); subirlo es cosa del servidor
+          && request.resource.data.get('walletBalance', 0) <= resource.data.get('walletBalance', 0)
+          // los viajes de regalo solo pueden bajar
+          && request.resource.data.get('freeTripsRemaining', 0) <= resource.data.get('freeTripsRemaining', 5)
+          // el rol se elige una sola vez (regla de negocio n.º 1)
+          && (!changed().hasAny(['role']) || resource.data.get('hasSelectedRole', false) != true)
+          // la verificación de conductor no se autoasigna después de crear la cuenta
+          && !changed().hasAny(['verified']))
+        ||
+        // Otro usuario (el pasajero) solo puede registrar calificación y viajes del conductor.
+        (signedIn() && changed().hasOnly(['rating', 'ratingsCount', 'trips']));
+
+      allow delete: if false;
     }
 
-    // Casillero de Ingresos y Métricas del Conductor
+    // ───────── Casillero de ingresos del conductor ─────────
     match /driver_boxes/{driverId} {
-      allow read, write: if true;
+      allow read: if isSelf(driverId);
+      allow create, update: if isSelf(driverId)
+        // el pasajero puede sumar su calificación al casillero del conductor
+        || (signedIn() && changed().hasOnly(['rating', 'ratingsCount', 'ratingsSum', 'updatedAt']));
+      allow delete: if false;
     }
 
-    // Solicitudes de Recarga de Saldo por QR y Bot de Telegram
-    match /wallet_recharges/{rechargeId} {
-      allow read, write: if true;
-    }
-
-    // Configuración del Sistema (Admin Telegram Bot, etc.)
-    match /system_config/{configId} {
-      allow read, write: if true;
-    }
-
-    // Solicitudes activas en tiempo real
-    match /active_requests/{requestId} {
-      allow read, write, delete: if true;
-    }
-
-    // Carreras y solicitudes de viaje
-    match /rides/{rideId} {
-      allow read, write, delete: if true;
-    }
-
-    // Chat en tiempo real durante el viaje (subcolecciones)
-    match /rides/{rideId}/messages/{messageId} {
-      allow read, write: if true;
-    }
-    match /rides/{rideId}/chat/{messageId} {
-      allow read, write: if true;
-    }
-
-    // Conductores en línea (GPS y disponibilidad en el mapa)
+    // ───────── Conductores en línea (mapa) ─────────
     match /online_drivers/{driverId} {
-      allow read, write: if true;
+      allow read: if signedIn();
+      allow create, update, delete: if isSelf(driverId)
+        || (signedIn() && changed().hasOnly(['rating']));
     }
 
-    // Historial forense y de viajes completados
-    match /tripsHistory/{tripId} {
-      allow read, write: if true;
+    // ───────── Recargas: solo el servidor las crea y las aprueba ─────────
+    match /wallet_recharges/{rechargeId} {
+      allow read: if signedIn() && resource.data.driverId == request.auth.uid;
+      allow write: if false;
     }
+
+    // ───────── Configuración del sistema: solo servidor ─────────
+    match /system_config/{configId} {
+      allow read, write: if false;
+    }
+
+    // ───────── Viajes urbanos ─────────
+    match /rides/{rideId} {
+      allow read: if signedIn();
+      allow create: if signedIn() && request.resource.data.passengerId == request.auth.uid;
+      allow update: if signedIn()
+        // el dueño del viaje no cambia nunca
+        && request.resource.data.passengerId == resource.data.passengerId
+        && (
+          resource.data.passengerId == request.auth.uid
+          || resource.data.get('driverId', '') == request.auth.uid
+          // un conductor puede tomar un viaje que aún no tiene conductor
+          || (resource.data.get('driverId', '') == '' && request.resource.data.get('driverId', '') == request.auth.uid)
+        );
+      allow delete: if signedIn() && resource.data.passengerId == request.auth.uid;
+
+      // Chat del viaje: solo el pasajero y el conductor
+      match /messages/{messageId} {
+        allow read, create: if signedIn() && (
+          get(/databases/$(database)/documents/rides/$(rideId)).data.passengerId == request.auth.uid
+          || get(/databases/$(database)/documents/rides/$(rideId)).data.get('driverId', '') == request.auth.uid
+        );
+        allow update, delete: if false;
+      }
+    }
+
+    match /active_requests/{requestId} {
+      allow read: if signedIn();
+      allow create: if signedIn() && request.resource.data.passengerId == request.auth.uid;
+      allow update: if signedIn()
+        && request.resource.data.passengerId == resource.data.passengerId
+        && (
+          resource.data.passengerId == request.auth.uid
+          || resource.data.get('driverId', '') == request.auth.uid
+          || (resource.data.get('driverId', '') == '' && request.resource.data.get('driverId', '') == request.auth.uid)
+        );
+      allow delete: if signedIn() && resource.data.passengerId == request.auth.uid;
+    }
+
+    // ───────── Historial de viajes completados ─────────
     match /trips_history/{tripId} {
-      allow read, write: if true;
+      allow read: if signedIn() && (
+        resource.data.get('passengerId', '') == request.auth.uid
+        || resource.data.get('driverId', '') == request.auth.uid
+      );
+      allow create: if signedIn() && (
+        request.resource.data.get('passengerId', '') == request.auth.uid
+        || request.resource.data.get('driverId', '') == request.auth.uid
+      );
+      allow update: if signedIn() && (
+        resource.data.get('passengerId', '') == request.auth.uid
+        || resource.data.get('driverId', '') == request.auth.uid
+      );
+      allow delete: if false;
     }
 
-    // Terminal Interprovincial (Salidas, Boletos, Expresos y Encomiendas)
+    // ───────── Terminal interprovincial ─────────
     match /terminal_departures/{departureId} {
-      allow read, write: if true;
+      allow read: if signedIn();
+      allow create: if signedIn();
+      // cualquier pasajero reserva un asiento: solo cambia los asientos ocupados
+      allow update: if signedIn() && changed().hasOnly(['occupiedSeats', 'updatedAt']);
+      allow delete: if false;
     }
     match /terminal_bookings/{bookingId} {
-      allow read, write: if true;
+      allow read: if signedIn() && resource.data.get('passengerId', '') == request.auth.uid;
+      allow create: if signedIn() && request.resource.data.passengerId == request.auth.uid;
+      allow update, delete: if false;
     }
     match /terminal_expresos/{expresoId} {
-      allow read, write: if true;
+      allow read: if signedIn() && resource.data.get('passengerId', '') == request.auth.uid;
+      allow create: if signedIn() && request.resource.data.passengerId == request.auth.uid;
+      allow update, delete: if false;
     }
     match /terminal_encomiendas/{encomiendaId} {
-      allow read, write: if true;
-    }
-
-    // Regla comodín para cualquier otra colección actual o futura
-    match /{document=**} {
-      allow read, write: if true;
+      // el código de rastreo permite consultar un envío ajeno: lectura con sesión
+      allow read: if signedIn();
+      allow create: if signedIn() && request.resource.data.get('senderId', '') == request.auth.uid;
+      allow update, delete: if false;
     }
   }
 }

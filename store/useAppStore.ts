@@ -159,6 +159,7 @@ export interface TerminalExpreso {
 export interface TerminalEncomienda {
   id: string;
   trackingCode: string;
+  senderId?: string;
   senderName: string;
   senderPhone: string;
   recipientName: string;
