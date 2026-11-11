@@ -8,9 +8,10 @@ import { haptics } from '@/utils/haptics';
 import { IosToastOverlay } from '@/components/shared/IosToastOverlay';
 import { IosSpinner } from '@/components/shared/IosSpinner';
 import { motion, AnimatePresence } from 'motion/react';
+import { APP_VERSION } from '@/lib/appVersion';
 
 export const LoginView = () => {
-  const { setCurrentView, loginUser } = useAppStore();
+  const { setCurrentView, loginUser, resetNotice, dismissResetNotice } = useAppStore();
 
   const [isLoading, setIsLoading] = useState(false);
   const [loadingText, setLoadingText] = useState('Iniciando sesión...');
@@ -164,6 +165,21 @@ export const LoginView = () => {
             Tu transporte más rápido, seguro y confiable en Riberalta, Beni.
           </p>
         </div>
+
+        {resetNotice && (
+          <motion.div
+            initial={{ opacity: 0, y: -8 }}
+            animate={{ opacity: 1, y: 0 }}
+            role="status"
+            className="p-4 rounded-2xl bg-gold-primary/10 border border-gold-primary/40 text-sm text-white space-y-2"
+          >
+            <p className="font-extrabold text-gold-primary">RiberGO se reinició: versión {APP_VERSION}</p>
+            <p className="text-xs text-text-secondary leading-relaxed">
+              Hicimos un reinicio general de la aplicación por temas de seguridad y cambios en nuestras normas, así que tu sesión se cerró. Ahora sí puedes registrarte de nuevo. ¡Gracias por tu paciencia!
+            </p>
+            <button type="button" onClick={dismissResetNotice} className="min-h-10 px-4 rounded-xl bg-gold-primary text-background text-xs font-black">Entendido</button>
+          </motion.div>
+        )}
 
         {errorMsg && (
           <div className="p-3 rounded-2xl bg-red-500/10 border border-red-500/30 text-xs text-red-400 flex items-center gap-2 animate-in fade-in">

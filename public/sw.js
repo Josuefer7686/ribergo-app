@@ -1,4 +1,4 @@
-const CACHE_NAME = 'ribergo-v2.8';
+const CACHE_NAME = 'ribergo-v3.0';
 const ASSETS_TO_CACHE = [
   '/',
   '/manifest.json',

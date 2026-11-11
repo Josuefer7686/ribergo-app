@@ -12,6 +12,7 @@ import { haptics } from '@/utils/haptics';
 import { audio } from '@/utils/audio';
 import { notifications } from '@/utils/notifications';
 import { usePwa } from '@/utils/pwa';
+import { APP_VERSION } from '@/lib/appVersion';
 import { DriverVehicleModal } from '@/components/modals/DriverVehicleModal';
 import { VehicleIcon } from '@/components/ui/VehicleIcon';
 import { apiService } from '@/services/apiService';
@@ -324,7 +325,7 @@ export const ProfileView = () => {
 
         <div className="flex flex-col items-center justify-center gap-1.5 text-[10px] text-text-secondary pb-4">
           <img src="/logo.png" alt="RiberGO Logo" className="w-5 h-5 rounded-md object-contain opacity-80" />
-          <span>RiberGO PWA v2.0 • Riberalta, Bolivia</span>
+          <span>RiberGO PWA v{APP_VERSION} • Riberalta, Bolivia</span>
         </div>
       </div>
 

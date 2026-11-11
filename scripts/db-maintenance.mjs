@@ -5,6 +5,7 @@
  *   node scripts/db-maintenance.mjs counts
  *   node scripts/db-maintenance.mjs backup
  *   node scripts/db-maintenance.mjs wipe --yes rides active_requests trips_history ...
+ *   node scripts/db-maintenance.mjs reset-all --yes   (BORRA TODO, usuarios y cuentas incluidos; respalda antes)
  *
  * `wipe` SOLO borra las colecciones que le nombres, exige --yes y nunca
  * acepta 'users'. Hace un respaldo automático antes de borrar.
@@ -12,6 +13,7 @@
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { cert, initializeApp } from 'firebase-admin/app';
 import { getFirestore } from 'firebase-admin/firestore';
+import { getAuth } from 'firebase-admin/auth';
 
 // Carga .env.local sin dependencias extra
 for (const line of readFileSync('.env.local', 'utf8').split('\n')) {
@@ -19,12 +21,15 @@ for (const line of readFileSync('.env.local', 'utf8').split('\n')) {
   if (m && !(m[1] in process.env)) process.env[m[1]] = m[2];
 }
 const account = JSON.parse(Buffer.from(process.env.FIREBASE_SERVICE_ACCOUNT_B64, 'base64').toString());
-const db = getFirestore(initializeApp({ credential: cert(account), projectId: account.project_id }));
+const app = initializeApp({ credential: cert(account), projectId: account.project_id });
+const db = getFirestore(app);
 
 const TOP = [
   'users', 'online_drivers', 'driver_boxes', 'rides', 'active_requests', 'trips_history',
   'wallet_recharges', 'terminal_departures', 'terminal_bookings', 'terminal_expresos',
   'terminal_encomiendas', 'system_config',
+  'driver_verifications', 'driver_media', 'driver_id_docs', 'driver_vehicles', 'driver_vehicle_photos',
+  'sos_alerts', 'chat_reports',
 ];
 
 const ser = (v) => {
@@ -100,6 +105,22 @@ if (cmd === 'counts') {
   console.log('Respaldo previo:', await backup());
   console.log('Borrado (documentos por colección):', JSON.stringify(await wipe(names), null, 2));
   console.log('Estado final:', JSON.stringify(await counts(), null, 2));
+} else if (cmd === 'reset-all') {
+  // Reinicio total: borra todas las colecciones (menos system_config, que es configuración) y todas las cuentas de acceso.
+  if (!rest.includes('--yes')) { console.error('Falta --yes. No se borró nada.'); process.exit(1); }
+  console.log('Respaldo previo:', await backup());
+  const names = [...TOP.filter((c) => c !== 'system_config'), 'messages'];
+  console.log('Borrado (documentos por colección):', JSON.stringify(await wipe(names), null, 2));
+  const auth = getAuth(app);
+  let deleted = 0;
+  for (;;) {
+    const page = await auth.listUsers(1000);
+    if (!page.users.length) break;
+    await auth.deleteUsers(page.users.map((u) => u.uid));
+    deleted += page.users.length;
+  }
+  console.log(`Cuentas de acceso (Firebase Auth) borradas: ${deleted}`);
+  console.log('Estado final:', JSON.stringify(await counts(), null, 2));
 } else if (cmd === 'reset-counters') {
   // Pone en cero viajes y calificación de los perfiles. No toca nombre, teléfono, rol, vehículo ni saldo.
   if (!rest.includes('--yes')) { console.error('Falta --yes. No se cambió nada.'); process.exit(1); }
@@ -111,5 +132,5 @@ if (cmd === 'counts') {
   }
   console.log(`Contadores en cero en ${snap.size} perfiles.`);
 } else {
-  console.log('Uso: counts | backup | wipe --yes <colecciones...> | reset-counters --yes');
+  console.log('Uso: counts | backup | wipe --yes <colecciones...> | reset-all --yes | reset-counters --yes');
 }

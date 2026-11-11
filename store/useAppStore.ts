@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
+import { DATA_EPOCH } from '@/lib/appVersion';
 import { DriverData, ChatMessage, TripHistoryItem, INITIAL_TRIPS, RIBERALTA_CENTER, VehicleType } from '@/services/mockData';
 
 export type { VehicleType };
@@ -205,6 +206,10 @@ interface AppState {
   loginUser: (user: UserProfile, targetView?: AppView) => void;
   setRole: (role: UserRole) => void;
   logout: () => void;
+  /** Aviso de "reinicio de RiberGO" tras un borrado general de datos */
+  resetNotice: boolean;
+  forceReset: () => void;
+  dismissResetNotice: () => void;
 
   // User Preferences & Functional Settings
   preferences: UserPreferences;
@@ -314,6 +319,13 @@ export const useAppStore = create<AppState>()(
         user: state.user ? { ...state.user, ...data } : null,
       })),
       setRole: (role) => set({ role, activeTab: 'HOME' }),
+      resetNotice: false,
+      forceReset: () => set({
+        user: null, role: null, currentView: 'LOGIN', passengerState: 'IDLE', driverState: 'OFFLINE',
+        activeTrip: null, assignedDriver: null, selectedDriverId: null, chatMessages: [],
+        tripsHistory: [], hiddenChatIds: [], walletNotifications: [], pendingRecharge: null, resetNotice: true,
+      }),
+      dismissResetNotice: () => set({ resetNotice: false }),
       logout: () => set({ 
         user: null, 
         role: null, 
@@ -466,6 +478,16 @@ export const useAppStore = create<AppState>()(
     }),
     {
       name: 'ribergo-session-v1',
+      version: DATA_EPOCH,
+      // Un teléfono con datos de una época anterior (antes del reinicio) arranca limpio y con el aviso
+      migrate: (persisted: any, fromVersion: number) =>
+        fromVersion < DATA_EPOCH
+          ? {
+              ...persisted,
+              user: null, role: null, currentView: 'LOGIN', tripsHistory: [], hiddenChatIds: [],
+              walletNotifications: [], pendingRecharge: null, resetNotice: true,
+            }
+          : persisted,
       storage: createJSONStorage(() => (typeof window !== 'undefined' ? localStorage : ({} as any))),
       partialize: (state) => ({
         user: state.user,
@@ -474,6 +496,7 @@ export const useAppStore = create<AppState>()(
         preferences: state.preferences,
         tripsHistory: state.tripsHistory,
         hiddenChatIds: state.hiddenChatIds,
+        resetNotice: state.resetNotice,
         pendingRecharge: state.pendingRecharge,
         walletNotifications: state.walletNotifications,
       }),

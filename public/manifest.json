@@ -10,7 +10,7 @@
   "background_color": "#05080B",
   "theme_color": "#05080B",
   "orientation": "portrait",
-  "version": "2.1.0",
+  "version": "3.0.0",
   "icons": [
     {
       "src": "/icon-192.png?v=2.1",

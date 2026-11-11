@@ -3,7 +3,7 @@
 import { useEffect } from 'react';
 import { useAppStore } from '@/store/useAppStore';
 import { auth, db, isFirebaseConfigured } from '@/lib/firebase';
-import { onAuthStateChanged } from 'firebase/auth';
+import { onAuthStateChanged, signOut } from 'firebase/auth';
 import { doc, getDoc } from 'firebase/firestore';
 import { SplashView } from '@/components/views/SplashView';
 import { LoginView } from '@/components/views/LoginView';
@@ -46,7 +46,25 @@ export default function App() {
   useEffect(() => {
     if (!isFirebaseConfigured()) return;
 
+    // La primera respuesta de Firebase es la de "al abrir la app": solo ahí se comprueba que la
+    // cuenta siga existiendo, así nunca se expulsa a alguien que se está registrando.
+    let isBoot = true;
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+      const state = useAppStore.getState();
+      const boot = isBoot;
+      isBoot = false;
+      if (boot) {
+        // Reinicio general: la sesión de Firebase de antes de la nueva época se cierra
+        if (firebaseUser && state.resetNotice) {
+          await signOut(auth).catch(() => {});
+          return;
+        }
+        // La cuenta guardada en el teléfono ya no existe (borrada de la base de datos)
+        if (!firebaseUser && state.user) {
+          state.forceReset();
+          return;
+        }
+      }
       if (firebaseUser) {
         try {
           const userDoc = await getDoc(doc(db, 'users', firebaseUser.uid));
@@ -59,6 +77,10 @@ export default function App() {
               const hasRole = profileData.hasSelectedRole === true || (Boolean(profileData.role) && hasPhone);
               loginUser(profileData, hasRole ? 'MAIN_APP' : 'ROLE_SELECTION');
             }
+          } else if (boot) {
+            // Hay sesión pero su perfil ya no está en la base de datos: se cierra
+            await signOut(auth).catch(() => {});
+            useAppStore.getState().forceReset();
           }
         } catch (e) {
           console.warn('Error rehydrating Firebase session:', e);
