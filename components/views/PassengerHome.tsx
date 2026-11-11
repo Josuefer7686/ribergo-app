@@ -484,7 +484,7 @@ export const PassengerHome = () => {
       </div>
 
       {/* Botón de recentrar (fuera del panel solo cuando no hay panel arrastrable) */}
-      {!isPlanning && (
+      {passengerState !== 'CONFIRMING' && (
         <div className="relative z-20 px-4 w-full max-w-[430px] mx-auto flex justify-end pointer-events-none mb-3 mt-auto">
           <div className="pointer-events-auto">{gpsButton}</div>
         </div>
@@ -493,66 +493,6 @@ export const PassengerHome = () => {
       {/* Bottom Sheet Panels */}
       <div className="relative z-10 px-4 pb-[max(1rem,env(safe-area-inset-bottom))] w-full max-w-[430px] mx-auto pointer-events-none">
         <AnimatePresence mode="wait">
-          {/* STATE 1: IDLE / LOCATION_READY */}
-          {isIdle && (
-            <BottomSheet
-              key="idle"
-              floating={gpsButton}
-              title={<h2 className="font-display text-xl font-extrabold text-white whitespace-nowrap">Servicios disponibles</h2>}
-              footer={
-                <button
-                  onClick={handleStartBooking}
-                  className="w-full h-14 rounded-2xl bg-gold-primary text-background font-black text-base flex items-center justify-center gap-2.5 shadow-[0_10px_24px_-8px_rgba(255,198,26,0.55)] transition active:scale-[0.98]"
-                >
-                  <VehicleIcon type={urbanServiceType} className="w-5 h-5 stroke-[2.4]" />
-                  <span>
-                    {urbanServiceType === 'REMOLCADA'
-                      ? 'Pedir auxilio / remolcada'
-                      : urbanServiceType === 'MOTOCAR'
-                      ? 'Pedir Motocar'
-                      : urbanServiceType === 'TAXI_AUTO'
-                      ? 'Pedir Taxi Auto'
-                      : 'Pedir Mototaxi'}
-                  </span>
-                </button>
-              }
-            >
-              <ServicePicker
-                value={urbanServiceType}
-                onChange={(s) => setUrbanServiceType(s)}
-                getFare={getBaseFare}
-              />
-
-              {/* REMOLCADA BANNER NOTICE */}
-              {urbanServiceType === 'REMOLCADA' && (
-                <div className="p-3 rounded-2xl bg-amber-500/15 border border-amber-500/40 text-amber-200 text-sm flex items-start gap-2.5 animate-in fade-in duration-200">
-                  <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
-                  <div>
-                    <p className="font-bold text-white">Servicio de Auxilio Mecánico</p>
-                    <p className="text-xs text-amber-200/80 leading-snug">
-                      Un mototaxista vendrá a tu ubicación y remolcará tu motocicleta con el pie hasta tu casa o taller en Riberalta.
-                    </p>
-                  </div>
-                </div>
-              )}
-
-              <SafetyBanner />
-
-              {(urbanServiceType === 'MOTOTAXI' || urbanServiceType === 'REMOLCADA') && (
-                <button
-                  onClick={() => {
-                    haptics.selection();
-                    setUrbanServiceType(urbanServiceType === 'REMOLCADA' ? 'MOTOTAXI' : 'REMOLCADA');
-                  }}
-                  className="w-full min-h-11 text-sm font-semibold text-text-secondary flex items-center justify-center gap-2 active:text-white transition-colors"
-                >
-                  <Wrench className="w-4 h-4 text-gold-primary" />
-                  <span>{urbanServiceType === 'REMOLCADA' ? 'Volver a pedir un viaje' : '¿Moto varada? Pedir auxilio'}</span>
-                </button>
-              )}
-            </BottomSheet>
-          )}
-
           {/* STATE 2: CONFIRMING (destino elegido en el buscador) */}
           {passengerState === 'CONFIRMING' && destination && (
             <BottomSheet
@@ -621,6 +561,32 @@ export const PassengerHome = () => {
                   </button>
                 ))}
               </div>
+
+              {urbanServiceType === 'REMOLCADA' && (
+                <div className="p-3 rounded-2xl bg-amber-500/15 border border-amber-500/40 text-amber-200 text-sm flex items-start gap-2.5">
+                  <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                  <p className="text-xs leading-snug">
+                    <span className="block font-bold text-white">Servicio de Auxilio Mecánico</span>
+                    Un mototaxista vendrá a tu ubicación y remolcará tu moto con el pie hasta tu casa o taller.
+                  </p>
+                </div>
+              )}
+
+              <SafetyBanner />
+
+              {(urbanServiceType === 'MOTOTAXI' || urbanServiceType === 'REMOLCADA') && (
+                <button
+                  onClick={() => {
+                    haptics.selection();
+                    setCustomOffer(null);
+                    setUrbanServiceType(urbanServiceType === 'REMOLCADA' ? 'MOTOTAXI' : 'REMOLCADA');
+                  }}
+                  className="w-full min-h-11 text-sm font-semibold text-text-secondary flex items-center justify-center gap-2 active:text-white transition-colors"
+                >
+                  <Wrench className="w-4 h-4 text-gold-primary" />
+                  <span>{urbanServiceType === 'REMOLCADA' ? 'Volver a pedir un viaje' : '¿Moto varada? Pedir auxilio'}</span>
+                </button>
+              )}
             </BottomSheet>
           )}
 
