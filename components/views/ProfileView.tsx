@@ -246,7 +246,7 @@ export const ProfileView = () => {
                   <VehicleIcon type={user?.vehicleType || 'MOTOTAXI'} className="w-4 h-4 stroke-[2.2]" />
                 </div>
                 <div className="text-left">
-                  <span className="font-bold text-white block">Cambiar tipo de vehículo</span>
+                  <span className="font-bold text-white block">Mis vehículos</span>
                   <span className="text-[10px] text-gold-primary font-semibold">
                     {user?.vehicleType === 'MOTOCAR' ? 'Motocar de Carga' : user?.vehicleType === 'TAXI_AUTO' ? 'Taxi en Automóvil' : 'Mototaxi Normal'} • {user?.motorcycle || 'Estándar'}
                   </span>

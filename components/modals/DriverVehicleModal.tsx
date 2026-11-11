@@ -1,198 +1,139 @@
 'use client';
 
-import { useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
+import { motion } from 'motion/react';
+import { Check, Clock, Plus, RefreshCw, TriangleAlert } from 'lucide-react';
 import { useAppStore } from '@/store/useAppStore';
-import { VehicleType } from '@/services/mockData';
 import { apiService } from '@/services/apiService';
 import { IosModal } from '@/components/shared/IosModal';
-import { Check, ShieldCheck } from 'lucide-react';
 import { VehicleIcon } from '@/components/ui/VehicleIcon';
+import { AddVehicleOverlay, VEHICLE_OPTIONS } from '@/components/driver/DriverVerificationGate';
+import { activateVehicle, fetchVerification, type DriverVehicleInfo } from '@/services/driverVerificationClient';
 import { haptics } from '@/utils/haptics';
-import { audio } from '@/utils/audio';
 
-interface DriverVehicleModalProps {
+interface Props {
   isOpen: boolean;
   onClose: () => void;
 }
 
-export const DriverVehicleModal = ({ isOpen, onClose }: DriverVehicleModalProps) => {
+/** Mis vehículos: elige con cuál trabajas y registra otros (solo foto y modelo). */
+export const DriverVehicleModal = ({ isOpen, onClose }: Props) => {
   const { user, updateUserProfile, driverState, currentLocation } = useAppStore();
+  const [vehicles, setVehicles] = useState<DriverVehicleInfo[] | null>(null);
+  const [loadFailed, setLoadFailed] = useState(false);
+  const [busyType, setBusyType] = useState<string | null>(null);
+  const [message, setMessage] = useState('');
+  const [adding, setAdding] = useState(false);
 
-  const [selectedType, setSelectedType] = useState<VehicleType>(() => user?.vehicleType || 'MOTOTAXI');
-  const [model, setModel] = useState<string>(() => user?.motorcycle || 'Honda Wave 110');
-  const [plate, setPlate] = useState<string>(() => user?.plate || '482-RBT');
-  const [isSaving, setIsSaving] = useState(false);
+  const load = useCallback(async () => {
+    setLoadFailed(false);
+    const res = await fetchVerification();
+    if (res) setVehicles(res.vehicles);
+    else setLoadFailed(true);
+  }, []);
 
-  const vehicleOptions: {
-    type: VehicleType;
-    title: string;
-    description: string;
-    badge: string;
-  }[] = [
-    {
-      type: 'MOTOTAXI',
-      title: 'Mototaxi Normal',
-      description: 'Motocicleta tradicional para pasajeros',
-      badge: 'Base 10 BOB',
-    },
-    {
-      type: 'MOTOCAR',
-      title: 'Motocar de Carga',
-      description: 'Trimóvil con carrocería para traslados y cosas pesadas',
-      badge: 'Base 50 BOB',
-    },
-    {
-      type: 'TAXI_AUTO',
-      title: 'Taxi en Automóvil',
-      description: 'Auto cómodo de 4 ruedas para pasajeros',
-      badge: 'Base 35 BOB',
-    },
-  ];
+  useEffect(() => {
+    if (!isOpen) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void load();
+  }, [isOpen, load]);
 
-  const handleSave = async () => {
+  const use = async (v: DriverVehicleInfo) => {
+    if (busyType || v.type === user?.vehicleType) return;
     haptics.heavy();
-    audio.driverTripAccepted();
-    setIsSaving(true);
-
-    const updatedData = {
-      vehicleType: selectedType,
-      motorcycle: model.trim() || (selectedType === 'TAXI_AUTO' ? 'Toyota Corolla' : selectedType === 'MOTOCAR' ? 'Kingwong 200cc' : 'Honda Wave 110'),
-      plate: plate.trim().toUpperCase() || 'RBT-000',
-    };
-
-    updateUserProfile(updatedData);
-
-    if (user?.id) {
-      await apiService.updateDriverVehicle(user.id, selectedType, updatedData.motorcycle, updatedData.plate);
-
-      // Si el conductor está actualmente conectado, actualizar su estado en vivo inmediatamente
-      if (driverState !== 'OFFLINE') {
-        const loc = currentLocation || { lat: -11.0061, lng: -66.0747 };
-        await apiService.setDriverOnlineStatus(
-          user.id,
-          user.name || 'Conductor',
-          user.phone || '',
-          updatedData.motorcycle,
-          updatedData.plate,
-          user.rating ?? null,
-          loc,
-          true,
-          0,
-          0,
-          user.trips || 0,
-          user.avatar || '',
-          selectedType
-        );
+    setBusyType(v.type);
+    setMessage('');
+    const res = await activateVehicle(v.type);
+    if (res.ok && res.vehicleType) {
+      const model = res.motorcycle || v.model;
+      updateUserProfile({ vehicleType: res.vehicleType, motorcycle: model });
+      if (user?.id) {
+        await apiService.updateDriverVehicle(user.id, res.vehicleType, model, user.plate || '');
+        // Si está conectado, el mapa lo ve ahora con su nuevo vehículo
+        if (driverState !== 'OFFLINE') {
+          const loc = currentLocation || { lat: -11.0061, lng: -66.0747 };
+          await apiService.setDriverOnlineStatus(
+            user.id, user.name || 'Conductor', user.phone || '', model, user.plate || '',
+            user.rating ?? null, loc, true, 0, 0, user.trips || 0, user.avatar || '', res.vehicleType,
+          );
+        }
       }
+      haptics.success();
+    } else {
+      setMessage(res.error || 'No se pudo cambiar el vehículo.');
+      haptics.error();
     }
-
-    setIsSaving(false);
-    onClose();
+    setBusyType(null);
   };
 
+  const registrable = VEHICLE_OPTIONS.some((o) => !vehicles?.some((v) => v.type === o.type && v.status !== 'REJECTED'));
+
   return (
-    <IosModal isOpen={isOpen} onClose={onClose} title="Mi Vehículo de Trabajo">
-      <div className="space-y-4">
-        <div>
-          <label className="text-xs font-bold text-white block mb-1.5">
-            Selecciona tu tipo de vehículo
-          </label>
-          <p className="text-[11px] text-text-secondary mb-3">
-            Recibirás en tu pantalla únicamente las solicitudes correspondientes a tu vehículo y aparecerás en el mapa en esa categoría.
+    <>
+      <IosModal isOpen={isOpen && !adding} onClose={onClose} title="Mis vehículos">
+        <div className="space-y-4">
+          <p className="text-xs text-text-secondary">
+            Trabajas con un vehículo a la vez. Solo recibirás pedidos del que elijas. Para registrar otro basta su foto y modelo: no repites tu carnet.
           </p>
 
-          <div className="space-y-2">
-            {vehicleOptions.map((opt) => {
-              const isSelected = selectedType === opt.type;
-              return (
-                <button
-                  key={opt.type}
-                  type="button"
-                  onClick={() => {
-                    haptics.selection();
-                    setSelectedType(opt.type);
-                    if (opt.type === 'MOTOCAR' && (!model || model.includes('Wave') || model.includes('Honda'))) {
-                      setModel('Kingwong 200cc Carga');
-                    } else if (opt.type === 'TAXI_AUTO' && (!model || model.includes('Wave') || model.includes('Kingwong'))) {
-                      setModel('Toyota Caldina');
-                    } else if (opt.type === 'MOTOTAXI' && (!model || model.includes('Caldina') || model.includes('Kingwong'))) {
-                      setModel('Honda Wave 110');
-                    }
-                  }}
-                  className={`w-full p-3 rounded-2xl border text-left flex items-center justify-between transition ${
-                    isSelected
-                      ? 'bg-gold-primary/15 border-gold-primary shadow-lg shadow-gold-primary/10'
-                      : 'bg-surface-2/60 border-border-custom hover:border-gold-primary/40'
-                  }`}
-                >
-                  <div className="flex items-center gap-3">
-                    <div className="w-11 h-11 rounded-xl bg-[#05080B] border border-gold-primary/40 flex items-center justify-center p-2 text-gold-primary shrink-0 shadow-md">
-                      <VehicleIcon type={opt.type} className="w-6 h-6 stroke-[2.2]" />
-                    </div>
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <span className="text-xs font-black text-white">{opt.title}</span>
-                        <span className="px-1.5 py-0.5 rounded-md bg-gold-primary/20 text-[9px] font-bold text-gold-primary">
-                          {opt.badge}
-                        </span>
-                      </div>
-                      <p className="text-[10px] text-text-secondary mt-0.5">{opt.description}</p>
-                    </div>
-                  </div>
+          {loadFailed && (
+            <button onClick={() => void load()} className="w-full min-h-12 rounded-2xl bg-surface-2 border border-white/10 text-sm font-bold flex items-center justify-center gap-2">
+              <RefreshCw className="w-4 h-4" />No pudimos cargar. Reintentar
+            </button>
+          )}
+          {!vehicles && !loadFailed && <p className="text-sm text-text-secondary text-center py-6">Cargando…</p>}
 
-                  <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0 ${
-                    isSelected ? 'border-gold-primary bg-gold-primary text-background' : 'border-border-custom'
-                  }`}>
-                    {isSelected && <Check className="w-3 h-3 stroke-[3]" />}
+          <div className="space-y-2.5">
+            {vehicles?.map((v, i) => {
+              const active = v.type === user?.vehicleType && v.status === 'APPROVED';
+              const opt = VEHICLE_OPTIONS.find((o) => o.type === v.type)!;
+              return (
+                <motion.button
+                  key={v.type}
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: i * 0.06 }}
+                  type="button"
+                  disabled={v.status !== 'APPROVED' || !!busyType}
+                  onClick={() => use(v)}
+                  className={`w-full text-left rounded-2xl border-2 p-3.5 flex items-center gap-3.5 transition-colors ${active ? 'border-gold-primary bg-gold-primary/10' : 'border-white/10 bg-surface-2/60'}`}
+                >
+                  <div className={`w-12 h-12 rounded-xl flex items-center justify-center shrink-0 ${active ? 'bg-gold-primary text-background' : 'bg-surface text-gold-primary'}`}>
+                    <VehicleIcon type={v.type} className="w-7 h-7 stroke-[2.2]" />
                   </div>
-                </button>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-extrabold">{opt.title}</p>
+                    <p className="text-xs text-text-secondary break-words">{v.model}</p>
+                    {v.status === 'PENDING' && <p className="mt-1 inline-flex items-center gap-1 text-[11px] font-bold text-gold-primary"><Clock className="w-3 h-3" />En revisión</p>}
+                    {v.status === 'REJECTED' && <p className="mt-1 inline-flex items-start gap-1 text-[11px] font-bold text-rose-300"><TriangleAlert className="w-3 h-3 mt-0.5 shrink-0" />Rechazado: {v.rejectReason}</p>}
+                    {v.status === 'APPROVED' && !active && <p className="mt-1 text-[11px] font-bold text-emerald-300">Aprobado · toca para usarlo</p>}
+                  </div>
+                  {active && (
+                    <span className="inline-flex items-center gap-1 rounded-full bg-gold-primary text-background px-2.5 py-1 text-[11px] font-black"><Check className="w-3 h-3 stroke-[3]" />En uso</span>
+                  )}
+                  {busyType === v.type && <RefreshCw className="w-4 h-4 animate-spin text-gold-primary" />}
+                </motion.button>
               );
             })}
           </div>
-        </div>
 
-        {/* Modelo del vehículo */}
-        <div className="space-y-1.5">
-          <label className="text-xs font-bold text-white block">
-            Marca / Modelo del Vehículo
-          </label>
-          <input
-            type="text"
-            value={model}
-            onChange={(e) => setModel(e.target.value)}
-            placeholder="Ej. Honda Wave 110, Kingwong 200cc, Toyota Caldina"
-            className="w-full p-3 rounded-xl bg-surface-2 border border-border-custom text-white text-xs focus:outline-none focus:border-gold-primary"
-          />
-        </div>
+          {message && <p role="alert" className="text-sm text-rose-300">{message}</p>}
 
-        {/* Placa del vehículo */}
-        <div className="space-y-1.5">
-          <label className="text-xs font-bold text-white block">
-            Número de Placa
-          </label>
-          <input
-            type="text"
-            value={plate}
-            onChange={(e) => setPlate(e.target.value)}
-            placeholder="Ej. 482-RBT"
-            className="w-full p-3 rounded-xl bg-surface-2 border border-border-custom text-white text-xs font-mono uppercase focus:outline-none focus:border-gold-primary"
-          />
+          {vehicles && registrable && (
+            <button onClick={() => { haptics.selection(); setAdding(true); }} className="w-full min-h-12 rounded-2xl bg-gold-primary text-background font-black text-sm flex items-center justify-center gap-2 active:scale-[0.98] transition">
+              <Plus className="w-5 h-5 stroke-[3]" />Registrar otro vehículo
+            </button>
+          )}
         </div>
+      </IosModal>
 
-        <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs flex items-center gap-2">
-          <ShieldCheck className="w-4 h-4 shrink-0" />
-          <span className="text-[11px]">Tu información de vehículo se sincroniza automáticamente con el mapa de Riberalta.</span>
-        </div>
-
-        <button
-          type="button"
-          onClick={handleSave}
-          disabled={isSaving}
-          className="w-full py-3.5 rounded-xl bg-gold-primary hover:bg-gold-light text-background font-black text-xs uppercase tracking-wider transition active:scale-95 shadow-lg shadow-gold-primary/25 disabled:opacity-50"
-        >
-          {isSaving ? 'Guardando...' : 'Guardar y Aplicar'}
-        </button>
-      </div>
-    </IosModal>
+      {adding && vehicles && (
+        <AddVehicleOverlay
+          vehicles={vehicles}
+          onClose={() => setAdding(false)}
+          onSent={() => { setAdding(false); void load(); }}
+        />
+      )}
+    </>
   );
 };

@@ -3,7 +3,7 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { X } from 'lucide-react';
 import {
-  type AdminDoc, fmtDate, money, placeName, roleLabel, serviceLabel, toMs,
+  type AdminDoc, fmtDate, money, placeName, roleLabel, serviceLabel, statusInfo, toMs,
 } from './format';
 import { Chip, type Names, StatusChip } from './ui';
 
@@ -32,7 +32,7 @@ const LABELS: Record<string, string> = {
   recipientName: 'Destinatario', recipientPhone: 'Teléfono del destinatario',
   packageDescription: 'Contenido', origin: 'Origen', deliveryAddress: 'Dirección de entrega',
   pickupAddress: 'Recoger en', destinationAddress: 'Llevar a', departureDate: 'Día de salida',
-  idNumber: 'Carnet de identidad', fullName: 'Nombre completo', faceDistance: 'Distancia de rostro (menor es mejor)', faceMatch: 'Rostro vs carnet', livenessChallenges: 'Pruebas en vivo', rejectReason: 'Motivo del rechazo', resolvedAtMs: 'Resuelta',
+  idNumber: 'Carnet de identidad', fullName: 'Nombre completo', faceDistance: 'Distancia de rostro (menor es mejor)', faceMatch: 'Rostro vs carnet', livenessChallenges: 'Pruebas en vivo', rejectReason: 'Motivo del rechazo', vehicleTypes: 'Vehículos registrados', type: 'Tipo', model: 'Modelo', resolvedAtMs: 'Resuelta',
   reason: 'Motivo', note: 'Comentario', title: 'Tipo', rideId: 'Viaje (código)',
   reporterId: 'Quien reporta (código)', reporterName: 'Quien reporta', reporterPhone: 'Teléfono de quien reporta', reporterRole: 'Rol de quien reporta',
   reportedId: 'Reportado (código)', reportedName: 'Reportado', reportedPhone: 'Teléfono del reportado', reportedRole: 'Rol del reportado',
@@ -98,64 +98,146 @@ function renderValue(key: string, v: any, names: Names): ReactNode {
   return String(v);
 }
 
-const IMAGE_LABELS: [string, string][] = [
-  ['liveFrame', 'Rostro en vivo'], ['idFront', 'Carnet (anverso)'], ['idBack', 'Carnet (reverso)'], ['vehiclePhoto', 'Vehículo'],
+const PERSON_IMAGES: [string, string][] = [
+  ['liveFrame', 'Rostro en vivo'], ['idFront', 'Carnet (anverso)'], ['idBack', 'Carnet (reverso)'],
 ];
 
-function VerificationReview({ id, status }: { id: string; status: string }) {
+interface ReviewVehicle { id: string; type: string; model: string; status: string; photo: string }
+
+async function adminAction(body: Record<string, unknown>): Promise<{ ok: boolean; error?: string }> {
+  return fetch('/api/admin/verification', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+  }).then((x) => x.json()).catch(() => ({ ok: false, error: 'Sin conexión' }));
+}
+
+function Photo({ src, label }: { src?: string; label: string }) {
+  return (
+    <figure className="space-y-1">
+      {src ? (
+        <a href={src} target="_blank" rel="noreferrer"><img src={src} alt={label} className="aspect-[4/3] w-full rounded-lg border border-white/10 object-cover" /></a>
+      ) : <div className="aspect-[4/3] rounded-lg border border-white/10" />}
+      <figcaption className="text-xs text-text-secondary">{label}</figcaption>
+    </figure>
+  );
+}
+
+/** Revisión de una persona: fotos, vehículos y las acciones aprobar / rechazar / segunda oportunidad / banear. */
+function PersonReview({ id, status }: { id: string; status: string }) {
   const [images, setImages] = useState<Record<string, string> | null>(null);
+  const [vehicles, setVehicles] = useState<ReviewVehicle[]>([]);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [reason, setReason] = useState('');
   const [done, setDone] = useState('');
+  const [confirm, setConfirm] = useState<'' | 'reset' | 'ban'>('');
 
   useEffect(() => {
     let alive = true;
     fetch(`/api/admin/verification?id=${encodeURIComponent(id)}`)
       .then((r) => r.json())
-      .then((j) => alive && (j.ok ? setImages(j.images) : setError('No se pudieron cargar las fotos.')))
+      .then((j) => { if (!alive) return; if (j.ok) { setImages(j.images); setVehicles(j.vehicles || []); } else setError('No se pudieron cargar las fotos.'); })
       .catch(() => alive && setError('No se pudieron cargar las fotos.'));
     return () => { alive = false; };
   }, [id]);
 
-  const act = async (action: 'approve' | 'reject') => {
+  const act = async (action: 'approve' | 'reject' | 'reset' | 'ban' | 'unban', okText: string) => {
     setBusy(true);
-    const r = await fetch('/api/admin/verification', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id, action, reason }),
-    }).then((x) => x.json()).catch(() => ({ ok: false }));
+    const r = await adminAction({ id, action, reason });
     setBusy(false);
-    setDone(r.ok ? (action === 'approve' ? 'Conductor aprobado.' : 'Solicitud rechazada.') : 'No se pudo guardar. Intenta otra vez.');
+    setConfirm('');
+    setDone(r.ok ? okText : r.error || 'No se pudo guardar. Intenta otra vez.');
   };
 
+  const btn = 'h-10 flex-1 rounded-lg text-sm font-bold disabled:opacity-50';
   return (
     <section className="mb-5 space-y-4 rounded-xl border border-gold-primary/30 bg-background p-4">
-      <h3 className="font-display text-base font-extrabold">Fotos para revisar</h3>
+      <h3 className="font-display text-base font-extrabold">Revisión del conductor</h3>
       {error && <p className="text-sm text-rose-300">{error}</p>}
       {!images && !error && <p className="text-sm text-text-secondary">Cargando fotos…</p>}
       {images && (
-        <div className="grid grid-cols-2 gap-3">
-          {IMAGE_LABELS.map(([k, label]) => (
-            <figure key={k} className="space-y-1">
-              {images[k] ? (
-                <a href={images[k]} target="_blank" rel="noreferrer"><img src={images[k]} alt={label} className="aspect-[4/3] w-full rounded-lg border border-white/10 object-cover" /></a>
-              ) : <div className="aspect-[4/3] rounded-lg border border-white/10" />}
-              <figcaption className="text-xs text-text-secondary">{label}</figcaption>
-            </figure>
-          ))}
-        </div>
+        <>
+          <div className="grid grid-cols-2 gap-3">
+            {PERSON_IMAGES.map(([k, label]) => <Photo key={k} src={images[k]} label={label} />)}
+          </div>
+          {vehicles.length > 0 && (
+            <div className="space-y-2">
+              <p className="text-sm font-semibold">Vehículos que registró</p>
+              <div className="grid grid-cols-2 gap-3">
+                {vehicles.map((v) => <Photo key={v.id} src={v.photo} label={`${serviceLabel(v.type)} · ${v.model} · ${statusInfo(v.status).label}`} />)}
+              </div>
+              <p className="text-xs text-text-secondary">Al aprobar a la persona se aprueban también los vehículos pendientes.</p>
+            </div>
+          )}
+        </>
       )}
       {done ? (
         <p className="text-sm font-semibold text-emerald-300">{done}</p>
-      ) : status === 'PENDING' || status === 'REJECTED' || status === 'APPROVED' ? (
+      ) : (
+        <div className="space-y-2">
+          <input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Motivo (lo verá el conductor si rechazas o baneas)" className="h-10 w-full rounded-lg border border-white/10 bg-surface px-3 text-sm" />
+          {status === 'BANNED' ? (
+            <button disabled={busy} onClick={() => act('unban', 'Baneo quitado: podrá registrarse de nuevo.')} className={`${btn} w-full bg-emerald-500 text-black`}>Quitar baneo</button>
+          ) : (
+            <>
+              <div className="flex gap-2">
+                <button disabled={busy || status === 'APPROVED'} onClick={() => act('approve', 'Conductor aprobado.')} className={`${btn} bg-emerald-500 text-black`}>Aprobar</button>
+                <button disabled={busy || status === 'REJECTED'} onClick={() => act('reject', 'Solicitud rechazada.')} className={`${btn} bg-rose-500 text-white`}>Rechazar</button>
+              </div>
+              <div className="flex gap-2">
+                <button disabled={busy} onClick={() => setConfirm('reset')} className={`${btn} border border-white/15 text-white`}>Segunda oportunidad (borrar historial)</button>
+                <button disabled={busy} onClick={() => setConfirm('ban')} className={`${btn} border border-rose-400/60 text-rose-300`}>Banear</button>
+              </div>
+            </>
+          )}
+          {confirm && (
+            <div className="rounded-lg border border-white/15 bg-surface p-3 space-y-2 text-sm">
+              <p>{confirm === 'reset'
+                ? 'Se borran la solicitud, las fotos y los vehículos de este conductor. Podrá registrarse desde cero. ¿Seguro?'
+                : 'El conductor queda baneado y no podrá volver a registrarse hasta que le quites el baneo. ¿Seguro?'}</p>
+              <div className="flex gap-2">
+                <button onClick={() => setConfirm('')} className={`${btn} border border-white/15`}>Cancelar</button>
+                <button onClick={() => act(confirm, confirm === 'reset' ? 'Historial borrado: podrá registrarse de nuevo.' : 'Conductor baneado.')} className={`${btn} bg-rose-500 text-white`}>Sí, continuar</button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </section>
+  );
+}
+
+/** Revisión de un vehículo suelto (cuando un conductor ya verificado agrega otro). */
+function VehicleReview({ id, status }: { id: string; status: string }) {
+  const [photo, setPhoto] = useState('');
+  const [reason, setReason] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [done, setDone] = useState('');
+  useEffect(() => {
+    let alive = true;
+    fetch(`/api/admin/verification?kind=vehicle&id=${encodeURIComponent(id)}`).then((r) => r.json()).then((j) => alive && j.ok && setPhoto(j.images.vehicle || '')).catch(() => {});
+    return () => { alive = false; };
+  }, [id]);
+  const act = async (action: 'approve' | 'reject' | 'delete', okText: string) => {
+    setBusy(true);
+    const r = await adminAction({ kind: 'vehicle', id, action, reason });
+    setBusy(false);
+    setDone(r.ok ? okText : r.error || 'No se pudo guardar.');
+  };
+  const btn = 'h-10 flex-1 rounded-lg text-sm font-bold disabled:opacity-50';
+  return (
+    <section className="mb-5 space-y-4 rounded-xl border border-gold-primary/30 bg-background p-4">
+      <h3 className="font-display text-base font-extrabold">Revisión del vehículo</h3>
+      <Photo src={photo} label="Foto del vehículo" />
+      {done ? <p className="text-sm font-semibold text-emerald-300">{done}</p> : (
         <div className="space-y-2">
           <input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Motivo si lo rechazas (lo verá el conductor)" className="h-10 w-full rounded-lg border border-white/10 bg-surface px-3 text-sm" />
           <div className="flex gap-2">
-            <button disabled={busy} onClick={() => act('approve')} className="h-10 flex-1 rounded-lg bg-emerald-500 text-sm font-bold text-black disabled:opacity-50">Aprobar</button>
-            <button disabled={busy} onClick={() => act('reject')} className="h-10 flex-1 rounded-lg bg-rose-500 text-sm font-bold text-white disabled:opacity-50">Rechazar</button>
+            <button disabled={busy || status === 'APPROVED'} onClick={() => act('approve', 'Vehículo aprobado.')} className={`${btn} bg-emerald-500 text-black`}>Aprobar</button>
+            <button disabled={busy || status === 'REJECTED'} onClick={() => act('reject', 'Vehículo rechazado.')} className={`${btn} bg-rose-500 text-white`}>Rechazar</button>
+            <button disabled={busy} onClick={() => act('delete', 'Vehículo borrado: podrá registrarlo de nuevo.')} className={`${btn} border border-white/15`}>Borrar</button>
           </div>
         </div>
-      ) : null}
+      )}
     </section>
   );
 }
@@ -212,7 +294,8 @@ export function DocDetail({ doc, title, names, onClose }: Props) {
             </button>
           </div>
 
-          {doc.path.startsWith('driver_verifications/') && <VerificationReview id={doc.id} status={String(doc.data.status)} />}
+          {doc.path.startsWith('driver_verifications/') && <PersonReview id={doc.id} status={String(doc.data.status)} />}
+          {doc.path.startsWith('driver_vehicles/') && <VehicleReview id={doc.id} status={String(doc.data.status)} />}
 
           {raw ? (
             <pre className="overflow-x-auto rounded-xl border border-white/10 bg-background p-4 font-mono text-xs leading-relaxed text-text-secondary">

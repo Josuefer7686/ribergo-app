@@ -36,12 +36,19 @@ const ridesCols: Col[] = [
 ];
 
 export const COLUMNS: Record<string, Col[]> = {
+  driver_vehicles: [
+    { label: 'Pidió', render: when('createdAtMs') },
+    { label: 'Estado', render: (d) => <StatusChip status={d.data.status} /> },
+    { label: 'Conductor', render: (d, n) => <span className="font-semibold"><Person name={d.data.driverName} id={d.data.driverId} names={n} /></span> },
+    { label: 'Tipo', render: (d) => serviceLabel(d.data.type) },
+    { label: 'Modelo', wrap: true, render: (d) => d.data.model || '—' },
+  ],
   driver_verifications: [
     { label: 'Pidió', render: when('createdAtMs', 'createdAt') },
     { label: 'Estado', render: (d) => <StatusChip status={d.data.status} /> },
     { label: 'Nombre completo', render: (d) => <span className="font-semibold">{d.data.fullName || '—'}</span> },
     { label: 'Carnet', render: (d) => <span className="font-mono">{d.data.idNumber || '—'}</span> },
-    { label: 'Vehículo', render: (d) => d.data.vehicleModel || '—' },
+    { label: 'Vehículos', render: (d) => (Array.isArray(d.data.vehicleTypes) ? d.data.vehicleTypes.map(serviceLabel).join(', ') : '—') },
     { label: 'Rostro vs carnet', render: (d) => <Chip tone={d.data.faceMatch === 'OK' ? 'good' : 'warn'}>{d.data.faceMatch === 'OK' ? 'Coincide' : 'Revisar a mano'}{typeof d.data.faceDistance === 'number' ? ` · ${d.data.faceDistance}` : ''}</Chip> },
   ],
   sos_alerts: [
