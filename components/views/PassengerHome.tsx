@@ -457,7 +457,7 @@ export const PassengerHome = () => {
       )}
 
       {/* Bottom Sheet Panels */}
-      <div className="relative z-10 px-4 pb-[max(1rem,env(safe-area-inset-bottom))] w-full max-w-[430px] mx-auto">
+      <div className="relative z-10 px-4 pb-[max(1rem,env(safe-area-inset-bottom))] w-full max-w-[430px] mx-auto pointer-events-none">
         <AnimatePresence mode="wait">
           {/* STATE 1: IDLE / LOCATION_READY */}
           {isIdle && (
@@ -590,7 +590,7 @@ export const PassengerHome = () => {
               initial={{ scale: 0.9, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0.9, opacity: 0 }}
-              className="p-6 rounded-3xl bg-surface/95 border border-border-custom backdrop-blur-xl shadow-2xl text-center space-y-4 max-h-[calc(100dvh-16rem)] overflow-y-auto overscroll-contain no-scrollbar"
+              className="p-6 rounded-3xl bg-surface/95 border border-border-custom backdrop-blur-xl shadow-2xl text-center space-y-4 max-h-[calc(100dvh-16rem)] overflow-y-auto overscroll-contain no-scrollbar pointer-events-auto"
             >
               {/* Radar Concentric Circles */}
               <div className="relative w-24 h-24 mx-auto flex items-center justify-center">
@@ -648,7 +648,7 @@ export const PassengerHome = () => {
               initial={{ y: 100, opacity: 0 }}
               animate={{ y: 0, opacity: 1 }}
               exit={{ y: 100, opacity: 0 }}
-              className="p-5 rounded-3xl bg-surface/95 border border-border-custom backdrop-blur-xl shadow-2xl space-y-4 max-h-[calc(100dvh-16rem)] overflow-y-auto overscroll-contain no-scrollbar"
+              className="p-5 rounded-3xl bg-surface/95 border border-border-custom backdrop-blur-xl shadow-2xl space-y-4 max-h-[calc(100dvh-16rem)] overflow-y-auto overscroll-contain no-scrollbar pointer-events-auto"
             >
               <div className="flex items-center justify-between border-b border-border-custom pb-3">
                 <span className="text-xs font-bold text-gold-primary flex items-center gap-1.5">
@@ -744,7 +744,7 @@ export const PassengerHome = () => {
               initial={{ y: 100, opacity: 0 }}
               animate={{ y: 0, opacity: 1 }}
               exit={{ y: 100, opacity: 0 }}
-              className="p-5 rounded-3xl bg-surface/95 border border-border-custom backdrop-blur-xl shadow-2xl space-y-4 max-h-[calc(100dvh-16rem)] overflow-y-auto overscroll-contain no-scrollbar"
+              className="p-5 rounded-3xl bg-surface/95 border border-border-custom backdrop-blur-xl shadow-2xl space-y-4 max-h-[calc(100dvh-16rem)] overflow-y-auto overscroll-contain no-scrollbar pointer-events-auto"
             >
               <div className="flex items-center justify-between border-b border-border-custom pb-3">
                 <span className={`text-xs font-bold flex items-center gap-1.5 ${
@@ -805,7 +805,7 @@ export const PassengerHome = () => {
               initial={{ scale: 0.9, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0.9, opacity: 0 }}
-              className="p-6 rounded-3xl bg-surface/95 border border-border-custom backdrop-blur-xl shadow-2xl text-center space-y-4 max-h-[calc(100dvh-16rem)] overflow-y-auto overscroll-contain no-scrollbar"
+              className="p-6 rounded-3xl bg-surface/95 border border-border-custom backdrop-blur-xl shadow-2xl text-center space-y-4 max-h-[calc(100dvh-16rem)] overflow-y-auto overscroll-contain no-scrollbar pointer-events-auto"
             >
               <div className="w-14 h-14 rounded-full bg-gold-primary/20 border-2 border-gold-primary text-gold-primary flex items-center justify-center mx-auto shadow-lg shadow-gold-primary/20">
                 <Check className="w-8 h-8 stroke-[3]" />
