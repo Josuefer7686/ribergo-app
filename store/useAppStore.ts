@@ -253,6 +253,9 @@ interface AppState {
   // Trips History
   tripsHistory: TripHistoryItem[];
   addTripToHistory: (trip: TripHistoryItem) => void;
+  /** Chats que el usuario ocultó de su lista (solo en este teléfono) */
+  hiddenChatIds: string[];
+  hideChat: (id: string) => void;
 
   // PWA Prompt
   showPwaModal: boolean;
@@ -404,6 +407,9 @@ export const useAppStore = create<AppState>()(
         tripsHistory: [trip, ...state.tripsHistory.filter((t) => t.id !== trip.id)]
       })),
 
+      hiddenChatIds: [],
+      hideChat: (id) => set((state) => ({ hiddenChatIds: [...new Set([...state.hiddenChatIds, id])] })),
+
       showPwaModal: false,
       setShowPwaModal: (show) => set({ showPwaModal: show }),
 
@@ -467,6 +473,7 @@ export const useAppStore = create<AppState>()(
         currentView: state.user ? (state.currentView === 'SPLASH' ? 'MAIN_APP' : state.currentView) : state.currentView,
         preferences: state.preferences,
         tripsHistory: state.tripsHistory,
+        hiddenChatIds: state.hiddenChatIds,
         pendingRecharge: state.pendingRecharge,
         walletNotifications: state.walletNotifications,
       }),

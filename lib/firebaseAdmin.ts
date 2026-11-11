@@ -1,6 +1,7 @@
 import 'server-only';
 import { cert, getApps, initializeApp, type App } from 'firebase-admin/app';
 import { getFirestore, type Firestore } from 'firebase-admin/firestore';
+import { getAuth, type Auth } from 'firebase-admin/auth';
 
 /**
  * Firebase Admin SDK (SOLO servidor). Ignora las reglas de Firestore, por eso
@@ -37,4 +38,10 @@ export function getAdminDb(): Firestore | null {
     : initializeApp({ credential: cert(account as any), projectId: account.project_id });
   cached = getFirestore(app);
   return cached;
+}
+
+/** Auth de administrador: sirve para comprobar quién es el usuario que llama a una ruta. */
+export function getAdminAuth(): Auth | null {
+  if (!getAdminDb()) return null;
+  return getAuth(getApps()[0]);
 }

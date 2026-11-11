@@ -61,6 +61,7 @@ export function recency(d: AdminDoc): number {
 }
 
 export const STATUS: Record<string, { label: string; tone: Tone }> = {
+  OPEN: { label: 'Abierta', tone: 'bad' },
   SEARCHING_DRIVER: { label: 'Buscando conductor', tone: 'warn' },
   NEGOTIATING: { label: 'Negociando precio', tone: 'warn' },
   GOING_TO_PASSENGER: { label: 'Conductor en camino', tone: 'info' },

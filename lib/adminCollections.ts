@@ -3,7 +3,7 @@
  * en lenguaje sencillo. Es seguro importarlo desde el navegador (sin secretos).
  */
 
-export type CollectionGroupId = 'personas' | 'viajes' | 'dinero' | 'terminal' | 'sistema';
+export type CollectionGroupId = 'seguridad' | 'personas' | 'viajes' | 'dinero' | 'terminal' | 'sistema';
 
 export interface AdminCollection {
   /** Identificador estable que usa la URL del panel */
@@ -19,6 +19,7 @@ export interface AdminCollection {
 }
 
 export const GROUP_LABELS: Record<CollectionGroupId, string> = {
+  seguridad: 'Seguridad',
   personas: 'Personas',
   viajes: 'Viajes',
   dinero: 'Dinero',
@@ -27,6 +28,16 @@ export const GROUP_LABELS: Record<CollectionGroupId, string> = {
 };
 
 export const ADMIN_COLLECTIONS: AdminCollection[] = [
+  {
+    id: 'sos_alerts', path: 'sos_alerts', kind: 'collection', group: 'seguridad',
+    label: 'Alertas SOS',
+    description: 'Cada vez que un pasajero pulsa el botón SOS durante un viaje: quién es, con qué conductor va, dónde está y los últimos mensajes.',
+  },
+  {
+    id: 'chat_reports', path: 'chat_reports', kind: 'collection', group: 'seguridad',
+    label: 'Observaciones en el chat',
+    description: 'Reportes de apodos ofensivos, malas palabras o acoso. Cada uno guarda el chat completo, los datos de la persona reportada y la fecha.',
+  },
   {
     id: 'users', path: 'users', kind: 'collection', group: 'personas',
     label: 'Usuarios',

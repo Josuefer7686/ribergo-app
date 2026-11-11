@@ -11,7 +11,7 @@ import { DestinationSearch } from '@/components/passenger/DestinationSearch';
 import { ServicePicker } from '@/components/passenger/ServicePicker';
 import { OfferStepper } from '@/components/passenger/OfferStepper';
 import { BottomSheet } from '@/components/passenger/BottomSheet';
-import { SafetyBanner } from '@/components/passenger/SafetyBanner';
+import { SosButton } from '@/components/passenger/SosButton';
 import { 
   Bike, Navigation, Search, MapPin, Star, MessageSquare, X, Check, Clock, DollarSign, Shield, ChevronRight, AlertCircle,
   QrCode, Sparkles, TrendingUp, Flame, Compass, ShieldCheck, Bell, Crosshair
@@ -20,7 +20,7 @@ import { motion, AnimatePresence } from 'motion/react';
 
 import { TerminalView } from '@/components/terminal/TerminalView';
 import { NegotiationChatModal } from '@/components/modals/NegotiationChatModal';
-import { Wrench, Bus, AlertTriangle, Info } from 'lucide-react';
+import { Wrench, Bus, AlertTriangle, Info, Siren } from 'lucide-react';
 import { VehicleIcon } from '@/components/ui/VehicleIcon';
 import { useAutoLocation } from '@/hooks/useAutoLocation';
 import { calculateDistanceMeters, formatDistance, getBearingDirectionLabel } from '@/utils/geo';
@@ -320,6 +320,22 @@ export const PassengerHome = () => {
     haptics.notification();
     if (offerTimerRef.current) clearTimeout(offerTimerRef.current);
     const tripId = activeTrip?.id;
+    // Si ya había conductor, el chat queda en el historial de mensajes (solo lectura).
+    if (activeTrip && assignedDriver) {
+      addTripToHistory({
+        id: activeTrip.id,
+        date: 'Hoy',
+        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        pickup: currentLocation?.name || 'Mi Ubicación',
+        destination: destination?.name || 'Destino',
+        price: activeTrip.price,
+        driverName: assignedDriver.name,
+        driverRating: 5,
+        motorcycle: assignedDriver.motorcycle,
+        status: 'CANCELLED',
+        group: 'TODAY',
+      });
+    }
     resetRide();
     if (tripId) {
       try {
@@ -545,23 +561,6 @@ export const PassengerHome = () => {
                 </p>
               </div>
 
-              <div role="radiogroup" aria-label="Método de pago" className="grid grid-cols-2 gap-2 p-1 rounded-2xl bg-surface-2 border border-white/10">
-                {([['CASH', 'Efectivo'], ['QR', 'QR']] as const).map(([id, label]) => (
-                  <button
-                    key={id}
-                    role="radio"
-                    aria-checked={selectedPaymentMethod === id}
-                    onClick={() => { haptics.selection(); setSelectedPaymentMethod(id); }}
-                    className={`h-11 rounded-xl text-sm font-bold flex items-center justify-center gap-2 transition-colors ${
-                      selectedPaymentMethod === id ? 'bg-gold-primary text-background' : 'text-text-secondary'
-                    }`}
-                  >
-                    {id === 'QR' ? <QrCode className="w-4 h-4" /> : <DollarSign className="w-4 h-4" />}
-                    {label}
-                  </button>
-                ))}
-              </div>
-
               {urbanServiceType === 'REMOLCADA' && (
                 <div className="p-3 rounded-2xl bg-amber-500/15 border border-amber-500/40 text-amber-200 text-sm flex items-start gap-2.5">
                   <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
@@ -572,8 +571,6 @@ export const PassengerHome = () => {
                 </div>
               )}
 
-              <SafetyBanner />
-
               {(urbanServiceType === 'MOTOTAXI' || urbanServiceType === 'REMOLCADA') && (
                 <button
                   onClick={() => {
@@ -581,10 +578,10 @@ export const PassengerHome = () => {
                     setCustomOffer(null);
                     setUrbanServiceType(urbanServiceType === 'REMOLCADA' ? 'MOTOTAXI' : 'REMOLCADA');
                   }}
-                  className="w-full min-h-11 text-sm font-semibold text-text-secondary flex items-center justify-center gap-2 active:text-white transition-colors"
+                  className="w-full min-h-12 rounded-2xl bg-rose-500/15 border border-rose-500/50 text-rose-300 text-sm font-black flex items-center justify-center gap-2 active:scale-[0.98] transition"
                 >
-                  <Wrench className="w-4 h-4 text-gold-primary" />
-                  <span>{urbanServiceType === 'REMOLCADA' ? 'Volver a pedir un viaje' : '¿Moto varada? Pedir auxilio'}</span>
+                  <Siren className="w-4 h-4" />
+                  <span>{urbanServiceType === 'REMOLCADA' ? 'Volver a pedir un viaje' : 'SOS · ¿Moto varada? Pedir auxilio'}</span>
                 </button>
               )}
             </BottomSheet>
@@ -777,6 +774,13 @@ export const PassengerHome = () => {
                     : 'En viaje con el conductor. Al llegar, el conductor finalizará el viaje.'}
                 </span>
               </div>
+
+              {activeTrip?.id && (
+                <SosButton
+                  rideId={activeTrip.id}
+                  position={currentLocation ? { lat: currentLocation.lat, lng: currentLocation.lng } : null}
+                />
+              )}
 
               {/* Action Buttons: Chat & Cancel/Exit */}
               <div className="grid grid-cols-2 gap-3 pt-1">

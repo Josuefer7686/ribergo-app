@@ -32,17 +32,37 @@ const LABELS: Record<string, string> = {
   recipientName: 'Destinatario', recipientPhone: 'Teléfono del destinatario',
   packageDescription: 'Contenido', origin: 'Origen', deliveryAddress: 'Dirección de entrega',
   pickupAddress: 'Recoger en', destinationAddress: 'Llevar a', departureDate: 'Día de salida',
+  reason: 'Motivo', note: 'Comentario', title: 'Tipo', rideId: 'Viaje (código)',
+  reporterId: 'Quien reporta (código)', reporterName: 'Quien reporta', reporterPhone: 'Teléfono de quien reporta', reporterRole: 'Rol de quien reporta',
+  reportedId: 'Reportado (código)', reportedName: 'Reportado', reportedPhone: 'Teléfono del reportado', reportedRole: 'Rol del reportado',
+  reportedPlate: 'Placa del reportado', reportedVehicle: 'Vehículo del reportado', rideStatus: 'Estado del viaje', messageCount: 'Cantidad de mensajes',
+  messages: 'Chat completo', lastMessages: 'Últimos mensajes', passengerLocation: 'Ubicación del pasajero', driverVehicle: 'Vehículo', driverPlate: 'Placa',
   departureTime: 'Hora de salida', chatId: 'Chat de Telegram', adminName: 'Administrador',
 };
 
 const MONEY_KEYS = new Set(['price', 'amount', 'walletBalance', 'currentBalance', 'previousBalance', 'newBalance', 'todayIncome', 'totalIncome', 'pricePerSeat']);
-const PERSON_KEYS = new Set(['passengerId', 'driverId', 'senderId']);
+const PERSON_KEYS = new Set(['passengerId', 'driverId', 'senderId', 'reporterId', 'reportedId']);
 
 function renderValue(key: string, v: any, names: Names): ReactNode {
   if (v === null || v === undefined || v === '') return <span className="text-text-secondary">—</span>;
   if (typeof v === 'boolean') return v ? 'Sí' : 'No';
   if (key === 'status') return <StatusChip status={v} />;
-  if (key === 'role') return roleLabel(v);
+  if (key === 'role' || key === 'reporterRole' || key === 'reportedRole') return roleLabel(v);
+  if ((key === 'messages' || key === 'lastMessages') && Array.isArray(v)) {
+    return v.length === 0 ? 'Sin mensajes' : (
+      <ol className="space-y-1.5">
+        {v.map((m: any, i: number) => (
+          <li key={i} className="rounded-lg border border-white/10 bg-background px-3 py-2">
+            <span className="text-xs text-text-secondary">{m.sender === 'DRIVER' ? 'Conductor' : 'Pasajero'} · {fmtDate(toMs(m.createdAtMs), true)}</span>
+            <p className="whitespace-pre-wrap break-words">{m.text}</p>
+          </li>
+        ))}
+      </ol>
+    );
+  }
+  if (key === 'passengerLocation' && v && typeof v.lat === 'number') {
+    return <a className="text-gold-primary underline" target="_blank" rel="noreferrer" href={`https://www.google.com/maps?q=${v.lat},${v.lng}`}>{v.lat.toFixed(5)}, {v.lng.toFixed(5)} · abrir en el mapa</a>;
+  }
   if (key === 'serviceType' || key === 'vehicleType') return serviceLabel(v);
   if (key === 'sender') return v === 'DRIVER' ? 'Conductor' : 'Pasajero';
   if (MONEY_KEYS.has(key) && typeof v === 'number') return money(v);

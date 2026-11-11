@@ -36,6 +36,23 @@ const ridesCols: Col[] = [
 ];
 
 export const COLUMNS: Record<string, Col[]> = {
+  sos_alerts: [
+    { label: 'Cuándo', render: when('createdAtMs', 'createdAt') },
+    { label: 'Estado', render: () => <Chip tone="bad">SOS</Chip> },
+    { label: 'Pasajero', render: (d, n) => <span className="font-semibold"><Person name={d.data.passengerName} id={d.data.passengerId} names={n} /></span> },
+    { label: 'Teléfono', render: (d) => d.data.passengerPhone || '—' },
+    { label: 'Conductor', render: (d, n) => <Person name={d.data.driverName} id={d.data.driverId} names={n} /> },
+    { label: 'Vehículo', render: (d) => [d.data.driverVehicle, d.data.driverPlate].filter(Boolean).join(' · ') || '—' },
+    { label: 'Destino', wrap: true, render: (d) => placeName(d.data.destination) },
+  ],
+  chat_reports: [
+    { label: 'Cuándo', render: when('createdAtMs', 'createdAt') },
+    { label: 'Motivo', render: (d) => <Chip tone="warn">{d.data.reason || 'Observación'}</Chip> },
+    { label: 'Reportado', render: (d) => <span className="font-semibold">{d.data.reportedName || '—'} <span className="font-normal text-text-secondary">({roleLabel(d.data.reportedRole)})</span></span> },
+    { label: 'Teléfono', render: (d) => d.data.reportedPhone || '—' },
+    { label: 'Lo reportó', render: (d) => d.data.reporterName || '—' },
+    { label: 'Mensajes', align: 'right', render: (d) => d.data.messageCount ?? 0 },
+  ],
   users: [
     { label: 'Nombre', render: (d) => <span className="font-semibold">{d.data.name || 'Sin nombre'}</span> },
     { label: 'Rol', render: (d) => <Chip tone={d.data.role === 'DRIVER' ? 'warn' : 'info'}>{roleLabel(d.data.role)}</Chip> },

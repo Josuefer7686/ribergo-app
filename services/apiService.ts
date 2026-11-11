@@ -1878,6 +1878,34 @@ export const apiService = {
     return msg;
   },
 
+  /** Llama a una ruta de seguridad del servidor con el token de la sesión. */
+  async callSafetyApi(path: 'report' | 'sos', payload: Record<string, unknown>): Promise<{ ok: boolean; already?: boolean; error?: string }> {
+    try {
+      const token = await auth.currentUser?.getIdToken();
+      if (!token) return { ok: false, error: 'Vuelve a iniciar sesión para continuar.' };
+      const res = await fetch(`/api/safety/${path}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify(payload),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || !json.ok) return { ok: false, error: json.error || 'No se pudo enviar. Intenta otra vez.' };
+      return { ok: true, already: !!json.already };
+    } catch {
+      return { ok: false, error: 'Sin conexión. Intenta otra vez.' };
+    }
+  },
+
+  /** Reporta el chat de un viaje (el servidor guarda la conversación completa como prueba). */
+  reportChat(rideId: string, reason: string, note: string) {
+    return this.callSafetyApi('report', { rideId, reason, note });
+  },
+
+  /** Alerta SOS del pasajero durante el viaje. */
+  sendSos(rideId: string, position: { lat: number; lng: number } | null) {
+    return this.callSafetyApi('sos', { rideId, lat: position?.lat, lng: position?.lng });
+  },
+
   /**
    * Listen to real-time chat messages for a ride (merged 0ms local bus + Firestore with semantic deduplication)
    */

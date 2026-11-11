@@ -138,6 +138,21 @@ test('chat: solo participantes', async () => {
   await assertFails(getDoc(doc(as('intruso'), 'rides/r2/messages/m1')));
 });
 
+test('chat: al terminar el viaje ya no se puede escribir, pero sí leer', async () => {
+  await env.withSecurityRulesDisabled(async (ctx) => {
+    await setDoc(doc(ctx.firestore(), 'rides/r2/messages/old'), { sender: 'PASSENGER', text: 'hola' });
+    await updateDoc(doc(ctx.firestore(), 'rides/r2'), { status: 'COMPLETED' });
+  });
+  await assertSucceeds(getDoc(doc(as('pax1'), 'rides/r2/messages/old')));
+  await assertFails(setDoc(doc(as('pax1'), 'rides/r2/messages/m9'), { sender: 'PASSENGER', text: 'tarde' }));
+  await assertFails(setDoc(doc(as('driver1'), 'rides/r2/messages/m10'), { sender: 'DRIVER', text: 'tarde' }));
+});
+
+test('seguridad: reportes y SOS solo los toca el servidor', async () => {
+  await assertFails(setDoc(doc(as('pax1'), 'chat_reports/x'), { reason: 'x' }));
+  await assertFails(getDoc(doc(as('pax1'), 'sos_alerts/x')));
+});
+
 test('conductor en línea: solo escribes tu ubicación', async () => {
   await assertSucceeds(setDoc(doc(as('driver1'), 'online_drivers/driver1'), { lat: 1, lng: 2 }));
   await assertFails(setDoc(doc(as('pax1'), 'online_drivers/driver1'), { lat: 9, lng: 9 }));

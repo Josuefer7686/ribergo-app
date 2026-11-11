@@ -4,12 +4,14 @@ import { useState, useRef, useEffect } from 'react';
 import { useAppStore } from '@/store/useAppStore';
 import { 
   Send, CheckCheck, MessageSquare, ChevronRight, ArrowLeft, Bike, Sparkles, 
-  Wallet, CheckCircle2, ShieldCheck, Clock, AlertTriangle, MessageCircle, ExternalLink 
+  Wallet, CheckCircle2, ShieldCheck, Clock, AlertTriangle, MessageCircle, ExternalLink, Flag, Lock, Trash2, X
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { haptics } from '@/utils/haptics';
 import { audio } from '@/utils/audio';
 import { apiService } from '@/services/apiService';
+
+const REPORT_REASONS = ['Apodo ofensivo', 'Malas palabras', 'Acoso o amenazas', 'Otro motivo'];
 
 const PRESET_MESSAGES = [
   'Ya estoy cerca de tu ubicación.',
@@ -21,17 +23,27 @@ const PRESET_MESSAGES = [
 export const MessagesView = () => {
   const { 
     chatMessages, setChatMessages, activeTrip, assignedDriver, tripsHistory, 
-    role, walletNotifications, markWalletNotificationRead, setActiveTab 
+    role, walletNotifications, markWalletNotificationRead, setActiveTab,
+    passengerState, driverState, hiddenChatIds, hideChat,
   } = useAppStore();
   const [inputMessage, setInputMessage] = useState('');
-  const [selectedChatId, setSelectedChatId] = useState<string | null>(null);
+  const [selectedChatId, setSelectedChatId] = useState<string | null>(() => useAppStore.getState().activeTrip?.id ?? null);
+  const [room, setRoom] = useState<{ id: string | null; msgs: any[] }>({ id: null, msgs: [] });
+  const [reportOpen, setReportOpen] = useState(false);
+  const [reportReason, setReportReason] = useState(REPORT_REASONS[0]);
+  const [reportNote, setReportNote] = useState('');
+  const [reportState, setReportState] = useState<'idle' | 'sending' | 'sent'>('idle');
+  const [reportError, setReportError] = useState('');
+  const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string } | null>(null);
+  const pressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const longPressed = useRef(false);
   const [isWalletChatOpen, setIsWalletChatOpen] = useState(false);
   const [isInputFocused, setIsInputFocused] = useState(false);
   const [viewportHeight, setViewportHeight] = useState<number | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const effectiveChatId = selectedChatId || (activeTrip ? activeTrip.id : null);
+  const effectiveChatId = selectedChatId;
   const rideId = activeTrip?.id;
 
   const driverName = assignedDriver?.name || activeTrip?.driver?.name || (role === 'PASSENGER' ? 'Conductor RiberGO' : 'Pasajero RiberGO');
@@ -45,6 +57,51 @@ export const MessagesView = () => {
     });
     return () => unsubscribe();
   }, [rideId, setChatMessages]);
+
+  // Chat abierto (en curso o del historial): se lee siempre desde la base de datos
+  useEffect(() => {
+    if (!effectiveChatId) return;
+    const unsubscribe = apiService.subscribeToMessages(effectiveChatId, (msgs) => setRoom({ id: effectiveChatId, msgs }));
+    return () => unsubscribe();
+  }, [effectiveChatId]);
+
+  const roomMessages = room.id === effectiveChatId ? room.msgs : [];
+
+  // El chat solo admite mensajes mientras el viaje está en curso
+  const tripFinished = passengerState === 'TRIP_COMPLETED' || driverState === 'TRIP_COMPLETED';
+  const isChatOpen = !!activeTrip && activeTrip.id === effectiveChatId && !tripFinished;
+
+  const visibleHistory = tripsHistory.filter((t) => !hiddenChatIds.includes(t.id) && t.id !== activeTrip?.id);
+  const currentTripForHeader = tripsHistory.find((t) => t.id === effectiveChatId);
+  const roomName = isChatOpen ? driverName : currentTripForHeader?.driverName || driverName;
+
+  const startPress = (id: string, name: string) => {
+    longPressed.current = false;
+    if (pressTimer.current) clearTimeout(pressTimer.current);
+    pressTimer.current = setTimeout(() => {
+      longPressed.current = true;
+      haptics.heavy();
+      setDeleteTarget({ id, name });
+    }, 550);
+  };
+  const endPress = () => {
+    if (pressTimer.current) clearTimeout(pressTimer.current);
+    pressTimer.current = null;
+  };
+
+  const submitReport = async () => {
+    if (!effectiveChatId) return;
+    setReportState('sending');
+    setReportError('');
+    const res = await apiService.reportChat(effectiveChatId, reportReason, reportNote.trim());
+    if (res.ok) {
+      haptics.success();
+      setReportState('sent');
+    } else {
+      setReportError(res.error || 'No se pudo enviar el reporte.');
+      setReportState('idle');
+    }
+  };
 
   // Handle Mobile Virtual Keyboard Resize via visualViewport API
   useEffect(() => {
@@ -76,7 +133,7 @@ export const MessagesView = () => {
 
   useEffect(() => {
     scrollToBottom();
-  }, [chatMessages, effectiveChatId]);
+  }, [roomMessages, effectiveChatId]);
 
   const handleFocus = () => {
     setIsInputFocused(true);
@@ -95,21 +152,21 @@ export const MessagesView = () => {
 
   const handleSend = async (textToSend?: string) => {
     const text = textToSend || inputMessage;
-    if (!text.trim()) return;
+    if (!text.trim() || !isChatOpen) return;
 
     haptics.heavy();
     const currentSender = role === 'PASSENGER' ? 'PASSENGER' : 'DRIVER';
     if (!textToSend) setInputMessage('');
 
-    if (rideId) {
-      await apiService.sendMessage(rideId, currentSender, text);
+    if (effectiveChatId) {
+      await apiService.sendMessage(effectiveChatId, currentSender, text);
     }
 
     setTimeout(() => scrollToBottom(), 100);
   };
 
   // If user is inside the official Wallet & Finance Chat Room
-  if (isWalletChatOpen) {
+  if (isWalletChatOpen && role === 'DRIVER') {
     return (
       <div 
         className="w-full flex flex-col justify-between bg-background text-white relative overflow-hidden transition-all duration-200"
@@ -234,7 +291,7 @@ export const MessagesView = () => {
   }
 
   // If user is inside a specific Ride Chat Room
-  if (effectiveChatId && (activeTrip || tripsHistory.some(t => t.id === effectiveChatId))) {
+  if (effectiveChatId) {
     return (
       <div 
         className="w-full flex flex-col justify-between bg-background text-white relative overflow-hidden transition-all duration-200"
@@ -255,31 +312,50 @@ export const MessagesView = () => {
           <div className="relative">
             <img
               src={driverAvatar}
-              alt={driverName}
+              alt={roomName}
               className="w-10 h-10 rounded-full object-cover border border-gold-primary/40 shadow-md"
             />
-            <div className="w-3.5 h-3.5 rounded-full bg-gold-primary border-2 border-background absolute bottom-0 right-0 animate-pulse" />
+            {isChatOpen && <div className="w-3.5 h-3.5 rounded-full bg-gold-primary border-2 border-background absolute bottom-0 right-0 animate-pulse" />}
           </div>
           
-          <div className="flex-1">
-            <h3 className="text-sm font-bold text-white">{driverName}</h3>
-            <p className="text-[11px] text-gold-primary font-semibold flex items-center gap-1">
-              <span className="w-1.5 h-1.5 rounded-full bg-gold-primary animate-ping" />
-              <span>Viaje en curso • Riberalta</span>
+          <div className="flex-1 min-w-0">
+            <h3 className="text-sm font-bold text-white truncate">{roomName}</h3>
+            <p className={`text-[11px] font-semibold flex items-center gap-1 ${isChatOpen ? 'text-gold-primary' : 'text-text-secondary'}`}>
+              {isChatOpen ? (
+                <>
+                  <span className="w-1.5 h-1.5 rounded-full bg-gold-primary animate-ping" />
+                  <span>Viaje en curso • Riberalta</span>
+                </>
+              ) : (
+                <>
+                  <Lock className="w-3 h-3" />
+                  <span>Viaje finalizado • solo lectura</span>
+                </>
+              )}
             </p>
           </div>
+
+          <button
+            type="button"
+            onClick={() => { haptics.selection(); setReportState('idle'); setReportError(''); setReportOpen(true); }}
+            aria-label="Reportar este chat"
+            className="min-h-11 px-3 rounded-xl bg-rose-500/15 border border-rose-500/40 text-rose-300 text-xs font-bold flex items-center gap-1.5 active:scale-95 transition"
+          >
+            <Flag className="w-4 h-4" />
+            <span>Reportar</span>
+          </button>
         </div>
 
         {/* Messages Scroll Area */}
         <div className="flex-1 p-4 overflow-y-auto no-scrollbar space-y-3 relative z-10">
-          {chatMessages.length === 0 ? (
+          {roomMessages.length === 0 ? (
             <div className="p-6 text-center my-auto space-y-2 text-text-secondary">
               <MessageCircleIcon />
-              <p className="text-xs font-semibold text-white">Inicia la conversación</p>
-              <p className="text-[11px]">Envía un mensaje rápido a tu mototaxista abajo.</p>
+              <p className="text-xs font-semibold text-white">{isChatOpen ? 'Inicia la conversación' : 'Este viaje no tuvo mensajes'}</p>
+              {isChatOpen && <p className="text-[11px]">Envía un mensaje rápido abajo.</p>}
             </div>
           ) : (
-            chatMessages.map((msg) => {
+            roomMessages.map((msg) => {
               const isMe = (role === 'PASSENGER' && msg.sender === 'PASSENGER') || (role === 'DRIVER' && msg.sender === 'DRIVER');
               return (
                 <motion.div
@@ -309,7 +385,15 @@ export const MessagesView = () => {
           <div ref={messagesEndRef} className="h-2" />
         </div>
 
+        {!isChatOpen && (
+          <div className="shrink-0 bg-surface/95 border-t border-border-custom p-4 pb-safe z-30 flex items-center justify-center gap-2 text-xs font-semibold text-text-secondary">
+            <Lock className="w-4 h-4" />
+            <span>El viaje terminó: ya no se pueden enviar mensajes.</span>
+          </div>
+        )}
+
         {/* Super Animated iOS 18 Input Footer */}
+        {isChatOpen && (
         <div className="shrink-0 bg-surface/95 border-t border-border-custom backdrop-blur-2xl p-3 z-30 space-y-2.5 shadow-2xl">
           {/* Quick Presets Scrollable */}
           <div className="flex items-center gap-2 overflow-x-auto no-scrollbar pb-0.5">
@@ -394,6 +478,81 @@ export const MessagesView = () => {
             </motion.button>
           </form>
         </div>
+        )}
+
+        {/* Reportar chat */}
+        <AnimatePresence>
+          {reportOpen && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="absolute inset-0 z-50 bg-black/70 flex items-end"
+              onClick={() => reportState !== 'sending' && setReportOpen(false)}
+            >
+              <motion.div
+                initial={{ y: 80 }}
+                animate={{ y: 0 }}
+                exit={{ y: 80 }}
+                onClick={(e) => e.stopPropagation()}
+                role="dialog"
+                aria-label="Reportar chat"
+                className="w-full bg-surface rounded-t-[28px] border-t border-white/10 p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] space-y-4 max-h-[90%] overflow-y-auto"
+              >
+                {reportState === 'sent' ? (
+                  <div className="text-center space-y-3 py-4">
+                    <div className="w-14 h-14 rounded-full bg-emerald-500/20 text-emerald-300 flex items-center justify-center mx-auto"><CheckCircle2 className="w-8 h-8" /></div>
+                    <h4 className="font-display text-lg font-extrabold text-white">Reporte enviado</h4>
+                    <p className="text-sm text-text-secondary">Guardamos la conversación completa. La administración la revisará y podrá sancionar o expulsar a la persona.</p>
+                    <button type="button" onClick={() => setReportOpen(false)} className="w-full min-h-12 rounded-2xl bg-gold-primary text-background font-black">Listo</button>
+                  </div>
+                ) : (
+                  <>
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <h4 className="font-display text-lg font-extrabold text-white">Reportar a {roomName}</h4>
+                        <p className="text-xs text-text-secondary mt-1">Se enviará este chat completo, junto con la fecha y los datos de la persona, a la administración.</p>
+                      </div>
+                      <button type="button" onClick={() => setReportOpen(false)} aria-label="Cerrar" className="w-10 h-10 shrink-0 rounded-xl bg-surface-2 text-text-secondary flex items-center justify-center"><X className="w-5 h-5" /></button>
+                    </div>
+                    <div role="radiogroup" aria-label="Motivo del reporte" className="grid grid-cols-2 gap-2">
+                      {REPORT_REASONS.map((r) => (
+                        <button
+                          key={r}
+                          type="button"
+                          role="radio"
+                          aria-checked={reportReason === r}
+                          onClick={() => { haptics.selection(); setReportReason(r); }}
+                          className={`min-h-12 px-3 rounded-xl text-sm font-bold border transition ${reportReason === r ? 'bg-rose-500/20 border-rose-400 text-rose-200' : 'bg-surface-2 border-white/10 text-text-secondary'}`}
+                        >
+                          {r}
+                        </button>
+                      ))}
+                    </div>
+                    <textarea
+                      value={reportNote}
+                      onChange={(e) => setReportNote(e.target.value)}
+                      maxLength={400}
+                      rows={3}
+                      placeholder="Cuéntanos qué pasó (opcional)"
+                      className="w-full rounded-2xl bg-surface-2 border border-white/10 p-3 text-base text-white placeholder-text-secondary focus:outline-none focus:border-gold-primary resize-none"
+                    />
+                    {reportError && <p role="alert" className="text-sm text-rose-300">{reportError}</p>}
+                    <button
+                      type="button"
+                      onClick={submitReport}
+                      disabled={reportState === 'sending'}
+                      className="w-full min-h-12 rounded-2xl bg-rose-600 text-white font-black flex items-center justify-center gap-2 disabled:opacity-60"
+                    >
+                      <Flag className="w-5 h-5" />
+                      <span>{reportState === 'sending' ? 'Enviando…' : 'Enviar reporte'}</span>
+                    </button>
+                  </>
+                )}
+              </motion.div>
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
     );
   }
@@ -413,7 +572,8 @@ export const MessagesView = () => {
           </div>
         </div>
 
-        {/* PINNED OFFICIAL WALLET CHANNEL CARD */}
+        {/* Canal oficial de billetera: solo conductores */}
+        {role === 'DRIVER' && (
         <div className="space-y-2">
           <div className="flex items-center justify-between">
             <h3 className="text-xs font-bold text-gold-primary uppercase tracking-wider flex items-center gap-1.5">
@@ -462,6 +622,7 @@ export const MessagesView = () => {
             </div>
           </button>
         </div>
+        )}
 
         {/* ACTIVE TRIP CHAT CARD */}
         {activeTrip ? (
@@ -501,7 +662,7 @@ export const MessagesView = () => {
         ) : null}
 
         {/* EMPTY STATE WHEN NO ACTIVE TRIP AND NO CHATS */}
-        {!activeTrip && tripsHistory.length === 0 ? (
+        {!activeTrip && visibleHistory.length === 0 ? (
           <div className="p-8 text-center bg-surface rounded-3xl border border-border-custom space-y-3 my-8">
             <div className="w-16 h-16 rounded-3xl bg-surface-2 border border-border-custom flex items-center justify-center text-text-secondary mx-auto">
               <MessageSquare className="w-8 h-8 opacity-40 text-gold-primary" />
@@ -516,18 +677,25 @@ export const MessagesView = () => {
         ) : null}
 
         {/* PAST TRIPS CHAT THREADS */}
-        {tripsHistory.length > 0 && (
+        {visibleHistory.length > 0 && (
           <div className="space-y-3">
             <h3 className="text-xs font-bold text-text-secondary uppercase tracking-wider">Historial de conversaciones</h3>
+            <p className="text-[11px] text-text-secondary -mt-1">Mantén presionado un chat para borrarlo de tu lista.</p>
             <div className="space-y-2">
-              {tripsHistory.map((trip) => (
+              {visibleHistory.map((trip) => (
                 <button
                   key={trip.id}
+                  onPointerDown={() => startPress(trip.id, trip.driverName)}
+                  onPointerUp={endPress}
+                  onPointerLeave={endPress}
+                  onPointerCancel={endPress}
+                  onContextMenu={(e) => e.preventDefault()}
                   onClick={() => {
+                    if (longPressed.current) { longPressed.current = false; return; }
                     haptics.selection();
                     setSelectedChatId(trip.id);
                   }}
-                  className="w-full p-3.5 rounded-2xl bg-surface hover:bg-surface-2 border border-border-custom text-left flex items-center justify-between transition group"
+                  className="w-full select-none p-3.5 rounded-2xl bg-surface hover:bg-surface-2 border border-border-custom text-left flex items-center justify-between transition group"
                 >
                   <div className="flex items-center gap-3">
                     <div className="w-10 h-10 rounded-xl bg-surface-2 border border-border-custom flex items-center justify-center text-gold-primary">
@@ -545,6 +713,40 @@ export const MessagesView = () => {
           </div>
         )}
       </div>
+
+      <AnimatePresence>
+        {deleteTarget && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[80] bg-black/70 flex items-center justify-center p-6"
+            onClick={() => setDeleteTarget(null)}
+          >
+            <motion.div
+              initial={{ scale: 0.94 }}
+              animate={{ scale: 1 }}
+              onClick={(e) => e.stopPropagation()}
+              role="alertdialog"
+              className="w-full max-w-sm rounded-3xl bg-surface border border-white/10 p-5 space-y-4"
+            >
+              <h4 className="font-display text-lg font-extrabold text-white">¿Borrar el chat con {deleteTarget.name}?</h4>
+              <p className="text-sm text-text-secondary">Desaparece solo de tu lista. Si hubo un problema, la administración conserva el registro.</p>
+              <div className="grid grid-cols-2 gap-2">
+                <button type="button" onClick={() => setDeleteTarget(null)} className="min-h-12 rounded-2xl bg-surface-2 border border-white/10 text-white font-bold">Cancelar</button>
+                <button
+                  type="button"
+                  onClick={() => { hideChat(deleteTarget.id); haptics.success(); setDeleteTarget(null); }}
+                  className="min-h-12 rounded-2xl bg-rose-600 text-white font-black flex items-center justify-center gap-2"
+                >
+                  <Trash2 className="w-4 h-4" />
+                  <span>Borrar</span>
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 };

@@ -91,7 +91,7 @@ export function BottomSheet({ title, children, footer, floating }: Props) {
           setTimeout(() => (dragged.current = false), 0);
         }}
         style={{ y }}
-        className="relative pointer-events-auto flex flex-col max-h-[calc(100dvh-21rem)] rounded-[28px] bg-surface border border-white/10 shadow-[0_-12px_40px_-12px_rgba(0,0,0,0.8)]"
+        className="relative pointer-events-auto flex flex-col max-h-[calc(100dvh-14rem)] rounded-[28px] bg-surface border border-white/10 shadow-[0_-12px_40px_-12px_rgba(0,0,0,0.8)]"
       >
         {floating && (
           <div className="absolute right-0 -top-[68px] pointer-events-none">{floating}</div>

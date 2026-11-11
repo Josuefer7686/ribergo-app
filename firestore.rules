@@ -96,10 +96,17 @@ service cloud.firestore {
 
       // Chat del viaje: solo el pasajero y el conductor
       match /messages/{messageId} {
-        allow read, create: if signedIn() && (
+        allow read: if signedIn() && (
           get(/databases/$(database)/documents/rides/$(rideId)).data.passengerId == request.auth.uid
           || get(/databases/$(database)/documents/rides/$(rideId)).data.get('driverId', '') == request.auth.uid
         );
+        // Cuando el viaje termina o se cancela, el chat queda solo para leer.
+        allow create: if signedIn()
+          && !(get(/databases/$(database)/documents/rides/$(rideId)).data.get('status', '') in ['COMPLETED', 'CANCELLED'])
+          && (
+            get(/databases/$(database)/documents/rides/$(rideId)).data.passengerId == request.auth.uid
+            || get(/databases/$(database)/documents/rides/$(rideId)).data.get('driverId', '') == request.auth.uid
+          );
         allow update, delete: if false;
       }
     }

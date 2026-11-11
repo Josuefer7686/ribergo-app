@@ -114,6 +114,11 @@ Visor en vivo de Firestore en español, solo para el dueño. **Lee por el servid
 - [`lib/adminCollections.ts`](lib/adminCollections.ts): catálogo y descripciones de cada colección. Para añadir una colección nueva: agregarla aquí y sus columnas en [`components/admin/columns.tsx`](components/admin/columns.tsx).
 - Solo lectura: el panel no escribe nada en la base de datos.
 
+### 3.6c. Seguridad del pasajero y chats
+- **SOS** ([`SosButton.tsx`](components/passenger/SosButton.tsx)): visible durante el viaje; aviso de 3 s solo con vibración (sin sonido, cancelable) y luego `POST /api/safety/sos` → documento en `sos_alerts` + aviso por Telegram al admin.
+- **Reporte de chat** (`POST /api/safety/report`): el servidor copia el chat real, datos del reportado y fecha a `chat_reports` ("Observación en el chat"). Ambas colecciones son solo-servidor y se ven en `/admin` → Seguridad. Las rutas verifican el token de Firebase (`lib/safety.ts`).
+- **Mensajes**: el canal "Billetera & Finanzas" es solo para conductores. El chat de un viaje terminado queda de solo lectura (también en `firestore.rules`); se borra de la lista con pulsación larga (`hiddenChatIds`, solo local).
+
 ### 3.7. Directorio `components/map/`
 - [`MapComponent.tsx`](components/map/MapComponent.tsx): Componente Leaflet con marcadores personalizados (pasajero, conductores cercanos, rutas trazadas y radio de búsqueda).
 - [`MapView.tsx`](components/map/MapView.tsx): Envoltorio cliente con importación dinámica (`next/dynamic` con `ssr: false`) para evitar errores de compilación del objeto `window` en Next.js.
@@ -354,7 +359,7 @@ curl -s "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/setWebhook" \
 - **El webhook exige** la cabecera `X-Telegram-Bot-Api-Secret-Token` y que quien pulse el botón sea `TELEGRAM_ADMIN_CHAT_ID`. Monto y conductor salen del documento `wallet_recharges`, jamás del texto del mensaje.
 - **`/api/wallet/request-topup`** valida montos permitidos (10/20/50/100 BOB), tamaño e imagen, y lee el saldo del servidor.
 - **Comisiones** (`deductTripCommission`, `decrementDriverFreeTrips`) usan transacciones sobre el saldo real.
-- **Reglas de Firestore (`firestore.rules`) cerradas.** Todo exige sesión; sin regla comodín. El saldo (`walletBalance`) y los viajes de regalo solo pueden **bajar** desde el cliente; subirlos es exclusivo del servidor. `wallet_recharges` y `system_config` son solo-servidor. El rol se elige una vez. Los viajes/chat solo los editan sus participantes. Hay 26 pruebas: `npm run test:rules` (necesita Java).
+- **Reglas de Firestore (`firestore.rules`) cerradas.** Todo exige sesión; sin regla comodín. El saldo (`walletBalance`) y los viajes de regalo solo pueden **bajar** desde el cliente; subirlos es exclusivo del servidor. `wallet_recharges` y `system_config` son solo-servidor. El rol se elige una vez. Los viajes/chat solo los editan sus participantes. Hay 28 pruebas: `npm run test:rules` (necesita Java).
 - **Firebase Admin (servidor):** `lib/firebaseAdmin.ts` lee la credencial de `FIREBASE_SERVICE_ACCOUNT_B64` (JSON de la cuenta de servicio en base64). Lo usan el webhook y `request-topup`, porque el Admin SDK ignora las reglas. Sin esa variable ambas rutas responden 503.
 - **Riesgos que quedan (aceptados por ahora):** la comisión por viaje y las calificaciones se escriben desde el cliente (un conductor tramposo podría no descontarse la comisión o un pasajero manipular una calificación). Para blindarlo hay que moverlos a rutas de servidor.
 - Nunca subas tokens, claves ni `.env*` al repositorio. Si se filtra un token, revócalo en @BotFather (`/revoke`).
