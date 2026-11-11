@@ -10,8 +10,20 @@ async function toCanvas(source: ImageSource, maxSide: number): Promise<HTMLCanva
   } else if (source instanceof HTMLVideoElement) {
     w = source.videoWidth; h = source.videoHeight; draw = source;
   } else {
-    const bmp = await createImageBitmap(source, { imageOrientation: 'from-image' });
-    w = bmp.width; h = bmp.height; draw = bmp;
+    // Las fotos de cámara pesan 12+ MP: se decodifican ya reducidas para no agotar la memoria del teléfono
+    let bmp: ImageBitmap;
+    try {
+      bmp = await createImageBitmap(source, { imageOrientation: 'from-image', resizeWidth: maxSide, resizeQuality: 'medium' });
+    } catch {
+      bmp = await createImageBitmap(source, { imageOrientation: 'from-image' });
+    }
+    const scale = Math.min(1, maxSide / Math.max(bmp.width, bmp.height));
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.round(bmp.width * scale);
+    canvas.height = Math.round(bmp.height * scale);
+    canvas.getContext('2d')!.drawImage(bmp, 0, 0, canvas.width, canvas.height);
+    bmp.close();
+    return canvas;
   }
   const scale = Math.min(1, maxSide / Math.max(w, h));
   const canvas = document.createElement('canvas');
@@ -24,7 +36,9 @@ async function toCanvas(source: ImageSource, maxSide: number): Promise<HTMLCanva
 const approxBytes = (dataUrl: string) => Math.floor(((dataUrl.length - 23) * 3) / 4);
 
 /** JPEG que cabe en `maxBytes`: baja la calidad y luego el tamaño hasta lograrlo. */
-export async function compressToLimit(source: ImageSource, maxSide: number, maxBytes: number): Promise<string> {
+export async function compressToLimit(input: ImageSource, maxSide: number, maxBytes: number): Promise<string> {
+  // Un archivo se decodifica una sola vez (ya reducido) y de ahí se sigue comprimiendo
+  const source: ImageSource = input instanceof Blob ? await toCanvas(input, maxSide) : input;
   let side = maxSide;
   for (let round = 0; round < 4; round++) {
     const canvas = await toCanvas(source, side);

@@ -281,7 +281,7 @@ function Wizard({
     setBusy(true);
     setError('');
     try {
-      const url = await compressToLimit(file, 1100, 230_000);
+      const url = await compressToLimit(file, 900, 150_000);
       setDrafts((d) => ({ ...d, [type]: { model: d[type]?.model ?? '', photo: url } }));
       haptics.success();
     } catch {
@@ -295,19 +295,14 @@ function Wizard({
     setBusy(true);
     setError('');
     try {
-      const url = await compressToLimit(file, 1400, 205_000);
-      if (kind === 'idFront') {
-        const d = await descriptorFromImage(await loadImage(url));
-        if (!d) {
-          setError('No vemos tu rostro en el carnet. Acércate, usa buena luz y evita reflejos.');
-          return;
-        }
-        setIdDescriptor(d);
-      }
+      // Sin reconocimiento facial aquí: la cámara del teléfono ya gasta mucha memoria.
+      // El rostro del carnet se analiza más adelante, en la prueba de rostro.
+      const url = await compressToLimit(file, 1000, 150_000);
+      if (kind === 'idFront') setIdDescriptor(null);
       setPhotos((p) => ({ ...p, [kind]: url }));
       haptics.success();
     } catch {
-      setError('No pudimos leer la foto. Intenta de nuevo con buena conexión.');
+      setError('No pudimos leer la foto. Intenta de nuevo.');
     } finally {
       setBusy(false);
     }
@@ -468,7 +463,6 @@ function Wizard({
             <>
               <Title icon={<IdCard className="w-7 h-7" />} title="Carnet: parte de adelante" text="Ponlo sobre una superficie plana, sin reflejos ni dedos tapando. Tu foto del carnet debe verse clara." />
               <PhotoCapture label="anverso del carnet" image={photos.idFront} busy={busy} onFile={(f) => pickIdPhoto('idFront', f)} icon={<IdCard className="w-10 h-10" />} />
-              {busy && <p className="text-center text-sm text-text-secondary">Analizando la foto…</p>}
             </>
           )}
 
@@ -481,7 +475,10 @@ function Wizard({
 
           {stepId === 'FACE' && (
             <FaceStep
+              idFront={photos.idFront}
               idDescriptor={idDescriptor}
+              onIdDescriptor={setIdDescriptor}
+              onRetakeId={() => go('ID_FRONT')}
               attempts={attempts}
               onAttempt={() => setAttempts((a) => a + 1)}
               onDone={(r) => { setFace(r); setStepId('REVIEW'); }}
@@ -649,9 +646,12 @@ function PhotoCapture({ label, image, busy, onFile, icon }: { label: string; ima
 }
 
 function FaceStep({
-  idDescriptor, attempts, maxAttempts, onAttempt, onDone,
+  idFront, idDescriptor, onIdDescriptor, onRetakeId, attempts, maxAttempts, onAttempt, onDone,
 }: {
+  idFront?: string;
   idDescriptor: Float32Array | null;
+  onIdDescriptor: (d: Float32Array) => void;
+  onRetakeId: () => void;
   attempts: number;
   maxAttempts: number;
   face?: unknown;
@@ -666,6 +666,7 @@ function FaceStep({
   const [message, setMessage] = useState('');
   const [shakeKey, setShakeKey] = useState(0);
   const [loadingText, setLoadingText] = useState('');
+  const [needRetakeId, setNeedRetakeId] = useState(false);
 
   const stopCamera = useCallback(() => {
     stopRef.current = true;
@@ -693,6 +694,22 @@ function FaceStep({
     } catch {
       return fail('No se pudo preparar el reconocimiento facial. Revisa tu internet e inténtalo otra vez.');
     }
+    // Rostro del carnet (se analiza aquí, junto a la prueba en vivo)
+    let idDesc = idDescriptor;
+    if (!idDesc && idFront) {
+      setLoadingText('Analizando la foto de tu carnet…');
+      try {
+        idDesc = await descriptorFromImage(await loadImage(idFront));
+      } catch {
+        idDesc = null;
+      }
+      if (!idDesc) {
+        setNeedRetakeId(true);
+        return fail('No vemos tu rostro en la foto del carnet. Vuelve a tomarla de cerca, con buena luz y sin reflejos.');
+      }
+      onIdDescriptor(idDesc);
+    }
+    setNeedRetakeId(false);
     if (!navigator.mediaDevices?.getUserMedia) {
       return fail('Este navegador no permite usar la cámara. Abre RiberGO en Chrome o Safari.');
     }
@@ -732,7 +749,7 @@ function FaceStep({
 
     setPhase('checking');
     stopCamera();
-    const distance = idDescriptor ? await faceDistance(result.descriptor, idDescriptor) : 1;
+    const distance = idDesc ? await faceDistance(result.descriptor, idDesc) : 1;
     const matched = distance <= FACE_MATCH_MAX_DISTANCE;
     if (!matched && attempts + 1 < maxAttempts) {
       onAttempt();
@@ -833,7 +850,10 @@ function FaceStep({
           <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-rose-300" />{message}
         </motion.p>
       )}
-      {phase === 'idle' && (
+      {phase === 'idle' && needRetakeId && (
+        <button className={primaryBtn} onClick={onRetakeId}><Camera className="w-5 h-5" />Volver a tomar el carnet</button>
+      )}
+      {phase === 'idle' && !needRetakeId && (
         <button className={primaryBtn} onClick={start}>
           <ScanFace className="w-5 h-5" />
           {message ? 'Intentar de nuevo' : 'Empezar prueba de rostro'}
