@@ -37,8 +37,24 @@ export async function POST(req: NextRequest) {
   const parsed = parseVehicles(body.vehicles);
   if ('error' in parsed) return NextResponse.json({ ok: false, error: parsed.error }, { status: 400 });
 
-  const user = (await db.collection('users').doc(uid).get()).data();
-  if (!user || user.role !== 'DRIVER') return NextResponse.json({ ok: false, error: 'Solo los conductores se verifican.' }, { status: 403 });
+  const userRef = db.collection('users').doc(uid);
+  let user = (await userRef.get()).data();
+  if (user?.role !== 'DRIVER') {
+    // La elección de rol puede no haber llegado a la base de datos (reglas, conexión).
+    // Si la cuenta nunca eligió pasajero de forma permanente, el servidor la registra como conductor.
+    if (user?.hasSelectedRole === true && user?.role === 'PASSENGER') {
+      return NextResponse.json({ ok: false, error: 'Esta cuenta es de pasajero. Para ser conductor crea otra cuenta.' }, { status: 403 });
+    }
+    const grant = {
+      role: 'DRIVER',
+      hasSelectedRole: true,
+      hasCompletedDriverTutorial: user?.hasCompletedDriverTutorial === true,
+      walletBalance: user?.walletBalance ?? 0,
+      freeTripsRemaining: typeof user?.freeTripsRemaining === 'number' && user.freeTripsRemaining > 0 ? user.freeTripsRemaining : 5,
+    };
+    await userRef.set(grant, { merge: true });
+    user = { ...(user || {}), ...grant };
+  }
 
   const ref = db.collection('driver_verifications').doc(uid);
   const current = (await ref.get()).data();
