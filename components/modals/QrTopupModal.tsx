@@ -36,7 +36,8 @@ export const QrTopupModal = ({ isOpen, onClose, onSuccess }: QrTopupModalProps) 
   const driverPhone = user?.phone || '';
   const vehicle = `${user?.vehicleType || 'MOTOTAXI'} - ${user?.motorcycle || 'Honda Wave 110'} (${user?.plate || 'RBT-482'})`;
   const currentBalance = typeof user?.walletBalance === 'number' ? user.walletBalance : 0.0;
-  const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=RIBERGO-TOPUP-${selectedAmount}BOB-DRIVER-${driverId}&color=05080B`;
+  // QR oficial de cobro (Banco Unión / Yasta) con la marca RiberGO alrededor; el QR en sí no se modifica
+  const qrUrl = '/qr-recarga.png';
 
   // Listen in real time to the recharge document in Firestore
   useEffect(() => {
@@ -91,7 +92,7 @@ export const QrTopupModal = ({ isOpen, onClose, onSuccess }: QrTopupModalProps) 
       const blobUrl = window.URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = blobUrl;
-      link.download = `ribergo-recarga-${selectedAmount}bob.png`;
+      link.download = 'ribergo-qr-recarga.png';
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
@@ -366,23 +367,18 @@ export const QrTopupModal = ({ isOpen, onClose, onSuccess }: QrTopupModalProps) 
                   </span>
                 </div>
 
-                {/* High-Res Bolivia QR */}
-                <div className="w-44 h-44 mx-auto p-3 bg-white rounded-2xl shadow-xl border-4 border-gold-primary/60 flex items-center justify-center relative group">
-                  <img
-                    src={qrUrl}
-                    alt="QR Bolivia RiberGO"
-                    className="w-full h-full object-contain"
-                  />
-                  <div className="absolute inset-0 bg-background/80 backdrop-blur-xs opacity-0 group-hover:opacity-100 transition flex items-center justify-center rounded-xl">
-                    <span className="text-[10px] font-bold text-gold-primary uppercase tracking-widest">
-                      QR Oficial RiberGO
-                    </span>
-                  </div>
+                {/* QR oficial */}
+                <div className="w-full max-w-[260px] mx-auto rounded-2xl overflow-hidden shadow-xl">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={qrUrl} alt="QR oficial de RiberGO para recargar saldo" className="w-full h-auto block" />
                 </div>
 
-                <p className="text-[11px] text-text-secondary leading-tight px-2">
-                  Descarga el QR en tu galería y ábrelo desde tu app bancaria (Yasta, Al Toque, BNB, BCP, Banco Unión, etc.) para pagar.
-                </p>
+                <div className="rounded-2xl bg-gold-primary/10 border border-gold-primary/40 p-3 text-left space-y-1">
+                  <p className="text-xs font-extrabold text-gold-primary">Paga exactamente {selectedAmount} Bs</p>
+                  <p className="text-[11px] text-text-secondary leading-snug">
+                    1) Descarga el QR o escanéalo con Yasta, Banco Unión o tu banco. 2) Escribe el monto: <strong className="text-white">{selectedAmount} Bs</strong>. 3) Guarda el comprobante y súbelo abajo.
+                  </p>
+                </div>
 
                 {/* DESCARGAR / GUARDAR EN GALERÍA */}
                 <button
