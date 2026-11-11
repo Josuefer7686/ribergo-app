@@ -4,7 +4,7 @@ import { useState, useEffect, useRef } from 'react';
 import { useAppStore, LocationPoint } from '@/store/useAppStore';
 import { MapView } from '@/components/map/MapView';
 import { 
-  Power, Navigation, MapPin, MessageSquare, Check, X, Clock, DollarSign, User, Bike, ChevronRight, AlertCircle, QrCode, Sparkles, Wrench, AlertTriangle 
+  Power, Navigation, MapPin, MessageSquare, Check, X, Clock, DollarSign, User, Bike, ChevronRight, AlertCircle, QrCode, Sparkles, Wrench, AlertTriangle, TrendingUp, TrendingDown 
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { haptics } from '@/utils/haptics';
@@ -35,6 +35,9 @@ export const DriverHome = () => {
   });
   const [showQrModal, setShowQrModal] = useState(false);
   const [lowBalanceBanner, setLowBalanceBanner] = useState(false);
+  const [accepting, setAccepting] = useState(false);
+  const [priceTrend, setPriceTrend] = useState<'up' | 'down' | null>(null);
+  const [requestNotice, setRequestNotice] = useState<string | null>(null);
 
   const lastLocationRef = useRef<LocationPoint | null>(currentLocation);
   const isAcceptingRef = useRef(false);
@@ -60,6 +63,12 @@ export const DriverHome = () => {
       return [];
     }
   });
+
+  useEffect(() => {
+    if (!requestNotice) return;
+    const t = setTimeout(() => setRequestNotice(null), 4000);
+    return () => clearTimeout(t);
+  }, [requestNotice]);
 
   const markRideAsRejected = (rideId: string) => {
     setRejectedRideIds((prev) => {
@@ -309,14 +318,24 @@ export const DriverHome = () => {
         return;
       }
 
-      // Si el chofer ya está visualizando la tarjeta de solicitud entrante (15s):
+      // Si el chofer ya está viendo la tarjeta de solicitud entrante:
       if (currentState === 'RIDE_REQUEST' && currentPending && !isAcceptingRef.current) {
-        // Solo cancelar si la solicitud fue tomada por otro conductor o explícitamente cancelada
         const matchingRide = pendingRides.find((r) => r.id === currentPending.id);
-        if (matchingRide && matchingRide.driverId && matchingRide.driverId !== driverId) {
+        if (!matchingRide || (matchingRide.driverId && matchingRide.driverId !== driverId)) {
+          // El pasajero canceló o la tomó otro conductor
+          setRequestNotice(matchingRide ? 'Otro conductor tomó este viaje.' : 'El pasajero canceló la solicitud.');
           setPendingRequest(null);
           setDriverState('ONLINE');
           lastAlertedRideIdRef.current = null;
+          return;
+        }
+        // El pasajero subió o bajó su oferta: se ve en vivo
+        const livePrice = Number(matchingRide.price);
+        if (Number.isFinite(livePrice) && livePrice > 0 && livePrice !== currentPending.price) {
+          setPriceTrend(livePrice > currentPending.price ? 'up' : 'down');
+          setPendingRequest({ ...currentPending, price: livePrice });
+          setCountdown(15);
+          haptics.impact();
         }
         return;
       }
@@ -330,11 +349,13 @@ export const DriverHome = () => {
         }
 
         lastAlertedRideIdRef.current = req.id;
+        setPriceTrend(null);
+        setRequestNotice(null);
         setPendingRequest({
           id: req.id,
           pickup: req.pickup,
           destination: req.destination,
-          price: req.price || 10,
+          price: Number(req.price) || 10,
           distanceKm: req.distanceKm || 2.5,
           durationMin: req.durationMin || 7,
           passengerName: req.passengerName || 'Pasajero RiberGO',
@@ -358,6 +379,7 @@ export const DriverHome = () => {
   useEffect(() => {
     if (driverState === 'RIDE_REQUEST') {
       const interval = setInterval(() => {
+        if (isAcceptingRef.current) return;
         setCountdown((prev) => {
           if (prev <= 1) {
             if (pendingRequestRef.current?.id) {
@@ -389,8 +411,8 @@ export const DriverHome = () => {
   const handleAcceptRequest = async () => {
     if (!pendingRequest || isAcceptingRef.current) return;
     isAcceptingRef.current = true;
+    setAccepting(true);
     haptics.heavy();
-    audio.driverTripAccepted();
 
     const rideToAccept = pendingRequest;
     const driverData = {
@@ -402,39 +424,58 @@ export const DriverHome = () => {
       avatar: user?.avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=150&q=80',
       motorcycle,
       plate,
+      vehicleType: user?.vehicleType || 'MOTOTAXI',
       currentLocation: currentLocation || { lat: -11.0061, lng: -66.0747 },
     };
 
-    const updatedRide = {
-      ...rideToAccept,
-      status: 'NEGOTIATING',
-      driverId: driverData.id,
-      driverName: driverData.name,
-      driverPhone: driverData.phone,
-      driverRating: driverData.rating,
-      motorcycle: driverData.motorcycle,
-      plate: driverData.plate,
-      driver: driverData,
-      acceptedAtMs: Date.now(),
-    };
-
-    // 1. Guardar de inmediato en el bus local ANTES de renderizar el chat para evitar lecturas de SEARCHING_DRIVER
-    realtimeSyncBus.saveRide(updatedRide);
-
-    // 2. Fijar estado en store y registrar marca temporal (0ms)
-    acceptedAtMsRef.current = Date.now();
-    lastAlertedRideIdRef.current = rideToAccept.id;
-    setActiveTrip(updatedRide);
-    setDriverState('NEGOTIATING');
-    setPendingRequest(null);
-
-    // 3. Persistir en Firestore de fondo
     try {
-      await apiService.acceptRide(rideToAccept.id, driverData);
+      // Acepta al precio que está viendo; si cambió justo ahora o ya la tomaron, avisa.
+      const result = await apiService.acceptRide(rideToAccept.id, driverData as any, rideToAccept.price);
+
+      if (result.ok) {
+        audio.driverTripAccepted();
+        acceptedAtMsRef.current = Date.now();
+        lastAlertedRideIdRef.current = rideToAccept.id;
+        setActiveTrip({
+          ...rideToAccept,
+          price: result.price,
+          proposedPrice: result.price,
+          fareAgreed: true,
+          status: 'GOING_TO_PASSENGER',
+          driverId: driverData.id,
+          driverName: driverData.name,
+          driverPhone: driverData.phone,
+          driverRating: driverData.rating,
+          motorcycle: driverData.motorcycle,
+          plate: driverData.plate,
+          driver: driverData,
+          acceptedAtMs: Date.now(),
+        } as any);
+        setDriverState('GOING_TO_PASSENGER');
+        setPendingRequest(null);
+      } else if (result.reason === 'PRICE_CHANGED' && result.price) {
+        haptics.error();
+        setPriceTrend(result.price > rideToAccept.price ? 'up' : 'down');
+        setPendingRequest({ ...rideToAccept, price: result.price });
+        setCountdown(15);
+        setRequestNotice(`El pasajero cambió su oferta a ${result.price} Bs. Revísala y acepta de nuevo.`);
+      } else if (result.reason === 'ERROR') {
+        haptics.error();
+        setRequestNotice('No se pudo aceptar. Revisa tu conexión e inténtalo otra vez.');
+      } else {
+        haptics.error();
+        markRideAsRejected(rideToAccept.id);
+        lastAlertedRideIdRef.current = null;
+        setPendingRequest(null);
+        setDriverState('ONLINE');
+        setRequestNotice(result.reason === 'GONE' ? 'El pasajero canceló la solicitud.' : 'Otro conductor tomó este viaje.');
+      }
     } catch (err) {
       console.warn('Error accepting ride:', err);
+      setRequestNotice('No se pudo aceptar. Inténtalo otra vez.');
     } finally {
       isAcceptingRef.current = false;
+      setAccepting(false);
     }
   };
 
@@ -703,7 +744,15 @@ export const DriverHome = () => {
                   Nueva Solicitud ({countdown}s)
                 </span>
                 <div className="text-right">
-                  <span className="text-xl font-black text-gold-primary">{pendingRequest.price} BOB</span>
+                  <span
+                    key={pendingRequest.price}
+                    aria-live="polite"
+                    className="inline-flex items-center gap-1 text-2xl font-black text-gold-primary tabular-nums animate-in zoom-in-90 duration-200"
+                  >
+                    {priceTrend === 'up' && <TrendingUp className="w-5 h-5 text-emerald-400" aria-label="Subió" />}
+                    {priceTrend === 'down' && <TrendingDown className="w-5 h-5 text-rose-400" aria-label="Bajó" />}
+                    {pendingRequest.price} Bs
+                  </span>
                   {pendingRequest.serviceType === 'REMOLCADA' ? (
                     <span className="block text-[9px] font-black text-amber-400 uppercase tracking-wider flex items-center justify-end gap-1">
                       <Wrench className="w-3 h-3 text-amber-400" />
@@ -726,6 +775,12 @@ export const DriverHome = () => {
                   ) : null}
                 </div>
               </div>
+
+              {requestNotice && (
+                <p role="status" className="px-3 py-2 rounded-xl bg-amber-500/15 border border-amber-500/40 text-amber-200 text-sm font-semibold leading-snug">
+                  {requestNotice}
+                </p>
+              )}
 
               {/* Passenger & Trip Info */}
               <div className="p-3.5 rounded-2xl bg-surface-2 border border-border-custom space-y-3">
@@ -788,7 +843,7 @@ export const DriverHome = () => {
 
                 <div className="space-y-1.5 text-xs border-t border-border-custom pt-2">
                   <p className="text-text-secondary"><span className="font-bold text-white">Recogida:</span> {pendingRequest.pickup.name}</p>
-                  <p className="text-text-secondary"><span className="font-bold text-gold-primary">Destino:</span> {pendingRequest.destination.name}</p>
+                  <p className="text-text-secondary"><span className="font-bold text-gold-primary">Destino:</span> {pendingRequest.destination.name}{pendingRequest.destination.isCustom && <span className="ml-1.5 px-1.5 py-0.5 rounded-md bg-surface text-[10px] font-bold text-text-secondary">escrito por el pasajero</span>}</p>
                   <p className="text-text-secondary">Distancia viaje: <span className="text-white font-semibold">{preferences.settings.units === 'mi' ? (pendingRequest.distanceKm * 0.621371).toFixed(1) + ' mi' : pendingRequest.distanceKm + ' km'}</span></p>
                 </div>
               </div>
@@ -803,9 +858,10 @@ export const DriverHome = () => {
                 </button>
                 <button
                   onClick={handleAcceptRequest}
-                  className="py-3 bg-gold-primary hover:bg-gold-light text-background rounded-xl font-black text-xs uppercase shadow-xl shadow-gold-primary/25 transition active:scale-95"
+                  disabled={accepting}
+                  className="py-3 bg-gold-primary hover:bg-gold-light text-background rounded-xl font-black text-xs uppercase shadow-xl shadow-gold-primary/25 transition active:scale-95 disabled:opacity-60 disabled:active:scale-100"
                 >
-                  ACEPTAR VIAJE
+                  {accepting ? 'ACEPTANDO…' : `ACEPTAR POR ${pendingRequest.price} BS`}
                 </button>
               </div>
             </motion.div>

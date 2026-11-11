@@ -18,6 +18,9 @@ import {
  */
 
 /** Un conductor sin señal por más de este tiempo se considera desconectado. */
+/** Límites de lo que un pasajero puede ofrecer por un viaje (Bs). */
+export const MIN_RIDE_OFFER = 5;
+export const MAX_RIDE_OFFER = 200;
 export const DRIVER_PRESENCE_TTL_MS = 2 * 60 * 1000;
 /** Cada cuánto un conductor en línea avisa que sigue ahí. */
 export const DRIVER_HEARTBEAT_MS = 30 * 1000;
@@ -1488,46 +1491,111 @@ export const apiService = {
   },
 
   /**
-   * Driver accepts ride in Cloud Firestore and enters NEGOTIATING phase
+   * El conductor acepta el viaje al precio que está viendo (estilo inDrive).
+   * Es atómico: solo gana el primero, y solo si el precio no cambió mientras tocaba "Aceptar".
+   * Pasa directo a GOING_TO_PASSENGER (sin regateo en el chat).
    */
-  async acceptRide(rideId: string, driver: DriverData) {
-    const updatePayload = {
-      id: rideId,
-      status: 'NEGOTIATING',
+  async acceptRide(
+    rideId: string,
+    driver: DriverData,
+    seenPrice: number
+  ): Promise<{ ok: true; price: number } | { ok: false; reason: 'TAKEN' | 'PRICE_CHANGED' | 'GONE' | 'ERROR'; price?: number }> {
+    const driverFields = {
       driverId: driver.id,
       driverName: driver.name,
       driverPhone: driver.phone,
-      driverRating: driver.rating,
+      driverRating: driver.rating ?? null,
       vehicleType: driver.vehicleType || 'MOTOTAXI',
-      motorcycle: driver.motorcycle,
-      plate: driver.plate,
-      acceptedAtMs: Date.now(),
+      motorcycle: driver.motorcycle || '',
+      plate: driver.plate || '',
     };
 
-    // 1. Notificar inmediatamente al bus (0ms)
-    realtimeSyncBus.saveRide(updatePayload);
+    if (!isFirebaseConfigured()) {
+      const local = realtimeSyncBus.getRide(rideId);
+      if (!local) return { ok: false, reason: 'GONE' };
+      if (local.status !== 'SEARCHING_DRIVER' || local.driverId) return { ok: false, reason: 'TAKEN' };
+      if (Number(local.price) !== Number(seenPrice)) return { ok: false, reason: 'PRICE_CHANGED', price: Number(local.price) };
+      realtimeSyncBus.saveRide({ id: rideId, ...driverFields, status: 'GOING_TO_PASSENGER', fareAgreed: true, acceptedAtMs: Date.now() });
+      return { ok: true, price: Number(seenPrice) };
+    }
 
-    // 2. Persistir en Firestore de fondo en active_requests y rides
-    if (isFirebaseConfigured()) {
-      try {
-        const updateData = {
-          status: 'NEGOTIATING',
-          driverId: driver.id,
-          driverName: driver.name,
-          driverPhone: driver.phone,
-          driverRating: driver.rating,
-          vehicleType: driver.vehicleType || 'MOTOTAXI',
-          motorcycle: driver.motorcycle,
-          plate: driver.plate,
+    try {
+      const rideRef = doc(db, 'rides', rideId);
+      const outcome = await runTransaction(db, async (tx) => {
+        const snap = await tx.get(rideRef);
+        if (!snap.exists()) return { ok: false as const, reason: 'GONE' as const };
+        const data: any = snap.data();
+        if (data.status !== 'SEARCHING_DRIVER' || data.driverId) return { ok: false as const, reason: 'TAKEN' as const };
+        const livePrice = Number(data.price);
+        if (livePrice !== Number(seenPrice)) {
+          return { ok: false as const, reason: 'PRICE_CHANGED' as const, price: livePrice };
+        }
+        tx.update(rideRef, {
+          ...driverFields,
+          status: 'GOING_TO_PASSENGER',
+          fareAgreed: true,
+          proposedPrice: livePrice,
+          acceptedAtMs: Date.now(),
+          acceptedAt: serverTimestamp(),
+        });
+        return { ok: true as const, price: livePrice };
+      });
+
+      if (outcome.ok) {
+        const mirror = {
+          ...driverFields,
+          status: 'GOING_TO_PASSENGER',
+          fareAgreed: true,
+          proposedPrice: outcome.price,
           acceptedAt: serverTimestamp(),
         };
-        await Promise.all([
-          updateDoc(doc(db, 'rides', rideId), updateData).catch(() => {}),
-          updateDoc(doc(db, 'active_requests', rideId), updateData).catch(() => {}),
-        ]);
-      } catch (err) {
-        console.warn('Firestore Accept Ride Error:', err);
+        realtimeSyncBus.saveRide({ id: rideId, ...driverFields, status: 'GOING_TO_PASSENGER', fareAgreed: true, price: outcome.price, acceptedAtMs: Date.now() });
+        await updateDoc(doc(db, 'active_requests', rideId), mirror).catch(() => {});
       }
+      return outcome;
+    } catch (err) {
+      console.warn('Firestore Accept Ride Error:', err);
+      return { ok: false, reason: 'ERROR' };
+    }
+  },
+
+  /**
+   * El pasajero sube o baja lo que ofrece mientras busca conductor.
+   * Solo vale mientras nadie haya aceptado; los conductores lo ven cambiar en vivo.
+   */
+  async updateRideOffer(rideId: string, price: number): Promise<boolean> {
+    const clean = Math.max(MIN_RIDE_OFFER, Math.min(MAX_RIDE_OFFER, Math.round(price)));
+    const local = realtimeSyncBus.getRide(rideId);
+    if (local && (local.status !== 'SEARCHING_DRIVER' || local.driverId)) return false;
+    realtimeSyncBus.saveRide({ id: rideId, price: clean, proposedPrice: clean, priceOfferedBy: 'PASSENGER' });
+
+    if (!isFirebaseConfigured()) return true;
+    try {
+      const rideRef = doc(db, 'rides', rideId);
+      const ok = await runTransaction(db, async (tx) => {
+        const snap = await tx.get(rideRef);
+        if (!snap.exists()) return false;
+        const data: any = snap.data();
+        if (data.status !== 'SEARCHING_DRIVER' || data.driverId) return false;
+        tx.update(rideRef, {
+          price: clean,
+          proposedPrice: clean,
+          priceOfferedBy: 'PASSENGER',
+          offerUpdatedAtMs: Date.now(),
+        });
+        return true;
+      });
+      if (ok) {
+        await updateDoc(doc(db, 'active_requests', rideId), {
+          price: clean,
+          proposedPrice: clean,
+          priceOfferedBy: 'PASSENGER',
+        }).catch(() => {});
+      }
+      return ok;
+    } catch (err) {
+      console.warn('Firestore updateRideOffer error:', err);
+      return false;
     }
   },
 

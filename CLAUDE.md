@@ -101,6 +101,7 @@
 - [`BottomSheet.tsx`](components/passenger/BottomSheet.tsx): Panel inferior arrastrable (solo el asa arrastra; se esconde dejando el título y vibra en oleada). Contenido con scroll propio y botón principal fijo al pie.
 - [`DestinationSearch.tsx`](components/passenger/DestinationSearch.tsx): Buscador con autocompletado sobre `RIBERALTA_DESTINATIONS` (45 lugares con coordenadas de OpenStreetMap y alias). Elegir un lugar muestra el botón **Ir**, que abre el panel de confirmación (`CONFIRMING`).
 - [`ServicePicker.tsx`](components/passenger/ServicePicker.tsx): Selector de tipos de vehículos urbanos con iconos oficiales nativos.
+- [`OfferStepper.tsx`](components/passenger/OfferStepper.tsx): Botón redondo con el precio y botones −/+ (de 1 en 1 hasta 20 Bs, luego de 5 en 5; 5–200 Bs). Se usa al confirmar y mientras se busca conductor (con radar).
 - [`SafetyBanner.tsx`](components/passenger/SafetyBanner.tsx): Consejos de seguridad y verificación de placa del conductor.
 - [`TerminalView.tsx`](components/terminal/TerminalView.tsx): Interfaz de la Terminal Interprovincial Riberalta ↔ Guayaramerín (Salidas, Expresos y Encomiendas).
 - [`SeatPickerModal.tsx`](components/terminal/SeatPickerModal.tsx): Selector interactivo de asientos en vagonetas Noah / Ipsum.
@@ -270,7 +271,8 @@ Colecciones de viajes interprovinciales y paquetería entre Riberalta y Guayaram
 
 1. **Inmutabilidad de Rol:** Un usuario registrado como pasajero **NO puede convertirse en conductor** con la misma cuenta. Si intenta trabajar, la app le indica que debe registrarse con otra cuenta de conductor independiente.
 2. **Ubicación del cambio de vehículo:** La pantalla de inicio del conductor (`DriverHome.tsx`) **debe mantenerse limpia y enfocada en el mapa y la aceptación de viajes**. El cambio entre Mototaxi, Taxi Auto o Motocar se realiza exclusivamente dentro de `ProfileView.tsx` ("Cambiar tipo de vehículo").
-3. **Precios Base en Chat / Negociación:**
+2b. **Precio estilo inDrive (sin regateo en el chat):** el pasajero ofrece un precio y puede **subirlo/bajarlo en vivo mientras busca** (`apiService.updateRideOffer`, solo si nadie aceptó). El conductor ve el precio cambiar en la tarjeta de solicitud y **acepta por ese precio** (`apiService.acceptRide(rideId, driver, seenPrice)`, transacción: gana el primero y solo si el precio no cambió). Al aceptar pasa directo a `GOING_TO_PASSENGER`; el estado `NEGOTIATING` ya no se usa. El chat queda solo para coordinar. Si el destino lo escribió el pasajero (`destination.isCustom`), su app lo envía solo al chat cuando un conductor acepta.
+3. **Precios Base (oferta inicial sugerida):**
    - **Mototaxi:** 10 BOB (admite opción de auxilio mecánico / remolcada con pie).
    - **Taxi Auto:** 35 BOB (NO admite remolcada con pie).
    - **Motocar:** 50 BOB (NO admite remolcada con pie).
@@ -352,7 +354,7 @@ curl -s "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/setWebhook" \
 - **El webhook exige** la cabecera `X-Telegram-Bot-Api-Secret-Token` y que quien pulse el botón sea `TELEGRAM_ADMIN_CHAT_ID`. Monto y conductor salen del documento `wallet_recharges`, jamás del texto del mensaje.
 - **`/api/wallet/request-topup`** valida montos permitidos (10/20/50/100 BOB), tamaño e imagen, y lee el saldo del servidor.
 - **Comisiones** (`deductTripCommission`, `decrementDriverFreeTrips`) usan transacciones sobre el saldo real.
-- **Reglas de Firestore (`firestore.rules`) cerradas.** Todo exige sesión; sin regla comodín. El saldo (`walletBalance`) y los viajes de regalo solo pueden **bajar** desde el cliente; subirlos es exclusivo del servidor. `wallet_recharges` y `system_config` son solo-servidor. El rol se elige una vez. Los viajes/chat solo los editan sus participantes. Hay 24 pruebas: `npm run test:rules` (necesita Java).
+- **Reglas de Firestore (`firestore.rules`) cerradas.** Todo exige sesión; sin regla comodín. El saldo (`walletBalance`) y los viajes de regalo solo pueden **bajar** desde el cliente; subirlos es exclusivo del servidor. `wallet_recharges` y `system_config` son solo-servidor. El rol se elige una vez. Los viajes/chat solo los editan sus participantes. Hay 26 pruebas: `npm run test:rules` (necesita Java).
 - **Firebase Admin (servidor):** `lib/firebaseAdmin.ts` lee la credencial de `FIREBASE_SERVICE_ACCOUNT_B64` (JSON de la cuenta de servicio en base64). Lo usan el webhook y `request-topup`, porque el Admin SDK ignora las reglas. Sin esa variable ambas rutas responden 503.
 - **Riesgos que quedan (aceptados por ahora):** la comisión por viaje y las calificaciones se escriben desde el cliente (un conductor tramposo podría no descontarse la comisión o un pasajero manipular una calificación). Para blindarlo hay que moverlos a rutas de servidor.
 - Nunca subas tokens, claves ni `.env*` al repositorio. Si se filtra un token, revócalo en @BotFather (`/revoke`).

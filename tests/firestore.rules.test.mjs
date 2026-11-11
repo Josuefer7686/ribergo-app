@@ -106,6 +106,11 @@ test('viajes: creas solo a tu nombre', async () => {
 test('viajes: un conductor puede tomar uno libre', async () => {
   await assertSucceeds(updateDoc(doc(as('driver1'), 'rides/r1'), { driverId: 'driver1', status: 'NEGOTIATING' }));
 });
+test('viajes: oferta en vivo, un conductor la toma y el segundo ya no puede', async () => {
+  await assertSucceeds(updateDoc(doc(as('pax1'), 'rides/r1'), { price: 15, proposedPrice: 15, priceOfferedBy: 'PASSENGER' }));
+  await assertSucceeds(updateDoc(doc(as('driver1'), 'rides/r1'), { driverId: 'driver1', status: 'GOING_TO_PASSENGER', fareAgreed: true }));
+  await assertFails(updateDoc(doc(as('intruso'), 'rides/r1'), { driverId: 'intruso', status: 'GOING_TO_PASSENGER' }));
+});
 test('viajes: no se puede secuestrar ni cambiar de dueño', async () => {
   await assertFails(updateDoc(doc(as('intruso'), 'rides/r2'), { status: 'CANCELLED' }));
   await assertFails(updateDoc(doc(as('intruso'), 'rides/r2'), { driverId: 'intruso' }));

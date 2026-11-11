@@ -4,10 +4,10 @@ import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
 import {
   ArrowRight, Banknote, Bus, GraduationCap, Hotel, Landmark, MapPin, Search,
-  ShoppingBasket, Stethoscope, Trees, Trophy, Wrench, X, Handshake, Sparkles,
+  Send, ShoppingBasket, Stethoscope, Trees, Trophy, Wrench, X, Handshake,
 } from 'lucide-react';
 import {
-  DESTINATION_IN_PERSON, RIBERALTA_DESTINATIONS,
+  DESTINATION_IN_PERSON, RIBERALTA_CENTER, RIBERALTA_DESTINATIONS,
   type DestinationCategory, type DestinationOption,
 } from '@/services/mockData';
 import { haptics } from '@/utils/haptics';
@@ -95,8 +95,27 @@ export function DestinationSearch({ selected, onSelect, onClear, onGo }: Props) 
       .map((r) => r.d);
   }, [query]);
 
+  // Lo escrito a mano (si no coincide exacto con un lugar) se ofrece como destino personalizado:
+  // el conductor que acepte lo recibe automáticamente en el chat.
+  const customRow = useMemo<DestinationOption | null>(() => {
+    const typed = text.replace(/[\u0000-\u001f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 80);
+    if (selected?.name || typed.length < 2) return null;
+    if (results.some((r) => fold(r.name) === fold(typed))) return null;
+    return {
+      id: 'custom-text',
+      name: typed,
+      address: 'Destino escrito por ti · se lo enviamos al conductor',
+      lat: RIBERALTA_CENTER.lat,
+      lng: RIBERALTA_CENTER.lng,
+      custom: true,
+    };
+  }, [text, selected?.name, results]);
+
   // Última fila siempre disponible: acordar el destino con el conductor.
-  const rows = useMemo(() => [...results, DESTINATION_IN_PERSON], [results]);
+  const rows = useMemo(
+    () => [...results, ...(customRow ? [customRow] : []), DESTINATION_IN_PERSON],
+    [results, customRow]
+  );
 
   useEffect(() => {
     if (!open) return;
@@ -233,7 +252,7 @@ export function DestinationSearch({ selected, onSelect, onClear, onGo }: Props) 
             <ul id={listId} role="listbox" className="pb-1.5 max-h-[52dvh] overflow-y-auto no-scrollbar">
               {rows.map((dest, i) => {
                 const inPerson = dest.id === DESTINATION_IN_PERSON.id;
-                const Icon = inPerson ? Handshake : CATEGORY_ICON[dest.category ?? 'otro'];
+                const Icon = inPerson ? Handshake : dest.custom ? Send : CATEGORY_ICON[dest.category ?? 'otro'];
                 const isActive = i === active;
                 return (
                   <li
@@ -255,7 +274,7 @@ export function DestinationSearch({ selected, onSelect, onClear, onGo }: Props) 
                       </span>
                       <span className="min-w-0 flex-1">
                         <span className="block text-[15px] font-bold text-white truncate">
-                          <Highlight text={dest.name} query={query} />
+                          {dest.custom ? `Ir a «${dest.name}»` : <Highlight text={dest.name} query={query} />}
                         </span>
                         <span className="block text-[13px] text-text-secondary truncate">
                           {dest.address}
@@ -266,12 +285,6 @@ export function DestinationSearch({ selected, onSelect, onClear, onGo }: Props) 
                 );
               })}
             </ul>
-            {query && results.length === 0 && (
-              <p className="px-4 pb-3 text-[13px] text-text-secondary flex items-center gap-2">
-                <Sparkles className="w-4 h-4 text-gold-primary shrink-0" aria-hidden />
-                No encontramos «{text.trim()}». Acuérdalo con tu conductor.
-              </p>
-            )}
           </motion.div>
         )}
       </AnimatePresence>

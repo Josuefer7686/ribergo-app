@@ -9,6 +9,7 @@ import { MapView } from '@/components/map/MapView';
 import { DESTINATION_IN_PERSON, DestinationOption } from '@/services/mockData';
 import { DestinationSearch } from '@/components/passenger/DestinationSearch';
 import { ServicePicker } from '@/components/passenger/ServicePicker';
+import { OfferStepper } from '@/components/passenger/OfferStepper';
 import { BottomSheet } from '@/components/passenger/BottomSheet';
 import { SafetyBanner } from '@/components/passenger/SafetyBanner';
 import { 
@@ -78,6 +79,38 @@ export const PassengerHome = () => {
   const baseFare = getBaseFare(urbanServiceType);
   const currentOfferFare = customOffer !== null ? customOffer : baseFare;
 
+  // Oferta en vivo mientras se busca conductor: se ve al instante y los conductores
+  // la reciben con un pequeño retraso (1 sola escritura tras terminar de pulsar).
+  const offerTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const searchingOffer = activeTrip?.price ?? currentOfferFare;
+
+  const handleOfferChange = (price: number) => {
+    const tripId = activeTripRef.current?.id;
+    if (!tripId) return;
+    setActiveTrip({ ...(activeTripRef.current as NonNullable<typeof activeTrip>), price, proposedPrice: price });
+    if (offerTimerRef.current) clearTimeout(offerTimerRef.current);
+    offerTimerRef.current = setTimeout(() => {
+      offerTimerRef.current = null;
+      apiService.updateRideOffer(tripId, price);
+    }, 350);
+  };
+
+  useEffect(() => () => {
+    if (offerTimerRef.current) clearTimeout(offerTimerRef.current);
+  }, []);
+
+  // Destino escrito a mano: al aceptar un conductor se le envía solo por el chat.
+  useEffect(() => {
+    const trip = activeTrip;
+    if (passengerState !== 'DRIVER_FOUND' || !trip?.id || !trip.destination?.isCustom) return;
+    const key = `ribergo_custom_dest_sent_${trip.id}`;
+    try {
+      if (sessionStorage.getItem(key)) return;
+      sessionStorage.setItem(key, '1');
+    } catch {}
+    apiService.sendMessage(trip.id, 'PASSENGER', `📍 Mi destino: ${trip.destination.name}`);
+  }, [passengerState, activeTrip?.id, activeTrip?.destination?.isCustom, activeTrip?.destination?.name]);
+
   // Request GPS location on initial load or button tap
   const handleFetchLocation = () => {
     haptics.selection();
@@ -130,7 +163,7 @@ export const PassengerHome = () => {
   // Destination search handlers
   const handlePickDestination = (dest: DestinationOption) => {
     haptics.impact();
-    setDestination({ lat: dest.lat, lng: dest.lng, name: dest.name, address: dest.address });
+    setDestination({ lat: dest.lat, lng: dest.lng, name: dest.name, address: dest.address, isCustom: dest.custom === true });
   };
 
   const handleClearDestination = () => {
@@ -285,6 +318,7 @@ export const PassengerHome = () => {
   // Cancel active ride (passenger only cancels/exits; driver controls start/finish)
   const handleCancelActiveRide = async () => {
     haptics.notification();
+    if (offerTimerRef.current) clearTimeout(offerTimerRef.current);
     const tripId = activeTrip?.id;
     resetRide();
     if (tripId) {
@@ -564,6 +598,13 @@ export const PassengerHome = () => {
                 getFare={getBaseFare}
               />
 
+              <div className="space-y-2">
+                <OfferStepper value={currentOfferFare} onChange={setCustomOffer} caption="Tu oferta" />
+                <p className="text-center text-xs text-text-secondary">
+                  Tú pones el precio. Podrás subirlo mientras buscamos conductor.
+                </p>
+              </div>
+
               <div role="radiogroup" aria-label="Método de pago" className="grid grid-cols-2 gap-2 p-1 rounded-2xl bg-surface-2 border border-white/10">
                 {([['CASH', 'Efectivo'], ['QR', 'QR']] as const).map(([id, label]) => (
                   <button
@@ -592,39 +633,33 @@ export const PassengerHome = () => {
               exit={{ scale: 0.9, opacity: 0 }}
               className="p-6 rounded-3xl bg-surface/95 border border-border-custom backdrop-blur-xl shadow-2xl text-center space-y-4 max-h-[calc(100dvh-16rem)] overflow-y-auto overscroll-contain no-scrollbar pointer-events-auto"
             >
-              {/* Radar Concentric Circles */}
-              <div className="relative w-24 h-24 mx-auto flex items-center justify-center">
-                <div className="absolute inset-0 rounded-full border-2 border-gold-primary/30 animate-radar" />
-                <div className="absolute inset-2 rounded-full border-2 border-gold-primary/20 animate-radar" style={{ animationDelay: '0.6s' }} />
-                <div className="w-14 h-14 rounded-full bg-gold-primary/10 border border-gold-primary/50 flex items-center justify-center text-gold-primary">
-                  <VehicleIcon type={urbanServiceType} className="w-7 h-7 stroke-[2.2] animate-bounce" />
-                </div>
-              </div>
+              <OfferStepper value={searchingOffer} onChange={handleOfferChange} radar caption="Ofreces" />
 
               <div>
-                <h3 className="text-base font-bold text-white">
+                <h3 className="font-display text-lg font-extrabold text-white">
                   {urbanServiceType === 'REMOLCADA'
-                    ? 'Buscando auxilio / remolque'
+                    ? 'Buscando auxilio…'
                     : urbanServiceType === 'MOTOCAR'
-                    ? 'Buscando motocar de carga'
+                    ? 'Buscando motocar…'
                     : urbanServiceType === 'TAXI_AUTO'
-                    ? 'Buscando taxi auto'
-                    : 'Buscando mototaxi'}
+                    ? 'Buscando taxi auto…'
+                    : 'Buscando mototaxi…'}
                 </h3>
-                <p className="text-xs text-text-secondary mt-1">
-                  {urbanServiceType === 'REMOLCADA'
-                    ? 'Localizando un mototaxista cercano para remolcarte al taller...'
-                    : urbanServiceType === 'MOTOCAR'
-                    ? 'Localizando motocarros con carrocería en Riberalta...'
-                    : urbanServiceType === 'TAXI_AUTO'
-                    ? 'Localizando taxis en automóvil cercanos en Riberalta...'
-                    : 'Estamos buscando un conductor cercano en Riberalta...'}
+                <p className="text-sm text-text-secondary mt-1 leading-snug">
+                  Los conductores ven tu oferta en vivo. Si tarda, súbela un poco para que te acepten más rápido.
                 </p>
+                {activeTrip?.destination?.name && activeTrip.destination.name !== DESTINATION_IN_PERSON.name && (
+                  <p className="text-sm font-semibold text-white mt-2 flex items-center justify-center gap-1.5">
+                    <MapPin className="w-4 h-4 text-gold-primary shrink-0" />
+                    <span className="truncate">{activeTrip.destination.name}</span>
+                  </p>
+                )}
               </div>
 
               <button
                 onClick={() => {
                   haptics.selection();
+                  if (offerTimerRef.current) clearTimeout(offerTimerRef.current);
                   const tripId = activeTrip?.id;
                   // 1. Optimistic UI: cerrar INMEDIATAMENTE (0ms)
                   setActiveTrip(null);
@@ -634,7 +669,7 @@ export const PassengerHome = () => {
                     apiService.cancelRideRequest(tripId);
                   }
                 }}
-                className="px-4 py-2 rounded-xl bg-surface-2 text-xs font-semibold text-text-secondary hover:text-white transition active:scale-95"
+                className="min-h-11 px-5 rounded-xl bg-surface-2 text-sm font-semibold text-text-secondary hover:text-white transition active:scale-95"
               >
                 Cancelar solicitud
               </button>

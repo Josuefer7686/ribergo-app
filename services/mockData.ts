@@ -8,6 +8,8 @@ export interface DestinationOption {
   category?: DestinationCategory;
   /** Palabras alternativas para que el buscador lo encuentre */
   aliases?: string[];
+  /** Destino escrito a mano por el pasajero (no está en el catálogo) */
+  custom?: boolean;
 }
 
 export type DestinationCategory =
