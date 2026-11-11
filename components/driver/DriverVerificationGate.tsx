@@ -447,7 +447,7 @@ function FaceStep({
           <li className="flex gap-2"><Check className="w-4 h-4 text-gold-primary shrink-0 mt-0.5" />Ponte en un lugar con buena luz, de frente a la luz.</li>
           <li className="flex gap-2"><Check className="w-4 h-4 text-gold-primary shrink-0 mt-0.5" />Sin gorra, sin lentes oscuros ni nada tapando tu cara.</li>
           <li className="flex gap-2"><Check className="w-4 h-4 text-gold-primary shrink-0 mt-0.5" />Sostén el celular a la altura de tus ojos, con tu cara dentro del óvalo.</li>
-          <li className="flex gap-2"><Check className="w-4 h-4 text-gold-primary shrink-0 mt-0.5" />Te pediremos parpadear y girar la cabeza a un lado y al otro, despacio.</li>
+          <li className="flex gap-2"><Check className="w-4 h-4 text-gold-primary shrink-0 mt-0.5" />Te pediremos girar la cabeza a un lado y luego al otro, despacio.</li>
         </ul>
       )}
 

@@ -3,7 +3,7 @@
  * Usa face-api.js (@vladmandic) cargado bajo demanda: solo se descarga cuando
  * un conductor se verifica.
  *
- *  - Prueba de vida: pide parpadear y girar la cabeza a ambos lados en orden
+ *  - Prueba de vida: pide girar la cabeza a un lado y luego al contrario
  *    aleatorio, así una foto impresa o en pantalla no sirve.
  *  - Coincidencia: compara el rostro en vivo con el del carnet.
  *
@@ -64,7 +64,7 @@ export async function faceDistance(a: Float32Array, b: Float32Array): Promise<nu
   return faceapi.euclideanDistance(a, b);
 }
 
-export type Challenge = 'blink' | 'turnA' | 'turnB';
+export type Challenge = 'turnA' | 'turnB';
 
 export interface LivenessStep { id: 'front' | Challenge | 'photo'; label: string }
 
@@ -89,23 +89,16 @@ export interface LivenessResult {
   challenges: Challenge[];
 }
 
-const dist = (a: { x: number; y: number }, b: { x: number; y: number }) => Math.hypot(a.x - b.x, a.y - b.y);
-const eyeRatio = (p: { x: number; y: number }[]) => (dist(p[1], p[5]) + dist(p[2], p[4])) / (2 * dist(p[0], p[3]));
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-/** El parpadeo puede ir en cualquier lugar; los dos giros siempre van seguidos (lado y luego el opuesto). */
+/** Dos giros seguidos: a un lado y luego al contrario. */
 function buildSteps(): LivenessStep[] {
-  const blinkAt = Math.floor(Math.random() * 3); // antes, entre o después de los giros
-  const seq: LivenessStep['id'][] = ['turnA', 'turnB'];
-  seq.splice(blinkAt === 1 ? 1 : blinkAt === 0 ? 0 : 2, 0, 'blink');
-  const label: Record<string, string> = {
-    front: 'Mira de frente',
-    blink: 'Parpadea',
-    turnA: 'Gira la cabeza a un lado',
-    turnB: 'Ahora al lado contrario',
-    photo: 'Foto final',
-  };
-  return (['front', ...seq, 'photo'] as LivenessStep['id'][]).map((id) => ({ id, label: label[id] }));
+  return [
+    { id: 'front', label: 'Mira de frente' },
+    { id: 'turnA', label: 'Gira la cabeza a un lado' },
+    { id: 'turnB', label: 'Ahora al lado contrario' },
+    { id: 'photo', label: 'Foto final' },
+  ];
 }
 
 /**
@@ -120,7 +113,7 @@ export async function runLiveness(
   const faceapi = await loadFaceApi();
   const options = new faceapi.TinyFaceDetectorOptions({ inputSize: 320, scoreThreshold: 0.4 });
   const steps = buildSteps();
-  const challenges = steps.map((s) => s.id).filter((id): id is Challenge => id === 'blink' || id === 'turnA' || id === 'turnB');
+  const challenges = steps.map((s) => s.id).filter((id): id is Challenge => id === 'turnA' || id === 'turnB');
 
   let completed = 0;
   const ui = (prompt: string, hint: string, tone: LivenessUi['tone'], faceVisible: boolean) =>
@@ -135,7 +128,6 @@ export async function runLiveness(
       widthShare: box.width / video.videoWidth,
       cx: (box.x + box.width / 2) / video.videoWidth,
       yaw: (pts[30].x - pts[0].x) / (pts[16].x - pts[0].x), // 0.5 = de frente
-      ear: (eyeRatio(pts.slice(36, 42)) + eyeRatio(pts.slice(42, 48))) / 2,
     };
   };
 
@@ -143,8 +135,6 @@ export async function runLiveness(
   ui('Pon tu cara dentro del óvalo', 'Buscando tu rostro…', 'bad', false);
   let stable = 0;
   let yawBase = 0.5;
-  let earBase = 0.3;
-  const earSamples: number[] = [];
   const yawSamples: number[] = [];
   const t0 = Date.now();
   while (stable < 6) {
@@ -157,24 +147,20 @@ export async function runLiveness(
     else if (f.yaw < 0.35 || f.yaw > 0.65) { stable = 0; ui('Mira de frente a la cámara', 'Tu cara está de lado', 'warn', true); }
     else {
       stable++;
-      earSamples.push(f.ear);
       yawSamples.push(f.yaw);
       ui('Perfecto, quédate quieto', 'Rostro detectado', 'good', true);
     }
     await sleep(60);
   }
   yawBase = yawSamples.reduce((a, b) => a + b, 0) / yawSamples.length;
-  earBase = Math.max(...earSamples);
   completed = 1;
 
   // 2) Retos
   let turnSign = 0;
   for (const step of steps.slice(1, -1)) {
     const began = Date.now();
-    let closed = false;
     let done = false;
-    const prompt =
-      step.id === 'blink' ? 'Parpadea una vez' : step.id === 'turnA' ? 'Gira la cabeza a un lado' : 'Ahora gira hacia el lado contrario';
+    const prompt = step.id === 'turnA' ? 'Gira la cabeza a un lado' : 'Ahora gira hacia el lado contrario';
     ui(prompt, 'Hazlo con calma', 'good', true);
     while (!done) {
       if (shouldStop()) return { passed: false, reason: 'Cancelado', challenges };
@@ -184,16 +170,11 @@ export async function runLiveness(
       const f = await read();
       if (!f) { ui(prompt, 'Perdimos tu rostro: vuelve al centro', 'warn', false); await sleep(60); continue; }
       ui(prompt, 'Muy bien, sigue', 'good', true);
-      if (step.id === 'blink') {
-        if (f.ear < earBase * 0.78) closed = true;
-        else if (closed && f.ear > earBase * 0.9) done = true;
-      } else {
-        const delta = f.yaw - yawBase;
-        if (step.id === 'turnA') {
-          if (Math.abs(delta) >= 0.1) { turnSign = Math.sign(delta); done = true; }
-        } else if (Math.sign(delta) === -turnSign && Math.abs(delta) >= 0.1) {
-          done = true;
-        }
+      const delta = f.yaw - yawBase;
+      if (step.id === 'turnA') {
+        if (Math.abs(delta) >= 0.1) { turnSign = Math.sign(delta); done = true; }
+      } else if (Math.sign(delta) === -turnSign && Math.abs(delta) >= 0.1) {
+        done = true;
       }
       await sleep(50);
     }
