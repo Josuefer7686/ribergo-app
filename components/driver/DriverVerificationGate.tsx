@@ -195,6 +195,26 @@ function Screen({ children }: { children: ReactNode }) {
   );
 }
 
+/** Borrador del registro: sobrevive a que el teléfono cierre la página mientras se abre la cámara. */
+interface Draft {
+  stepId: StepId;
+  selected: DriverVehicleType[];
+  drafts: Partial<Record<DriverVehicleType, { model: string; photo?: string }>>;
+  person: { fullName: string; idNumber: string };
+  photos: { idFront?: string; idBack?: string };
+  idDescriptor: number[] | null;
+  face: { facePhoto: string; liveFrame: string; distance: number; challenges: string[] } | null;
+  attempts: number;
+}
+const loadDraft = (key: string): Draft | null => {
+  try {
+    const raw = localStorage.getItem(key);
+    return raw ? (JSON.parse(raw) as Draft) : null;
+  } catch {
+    return null;
+  }
+};
+
 type StepId = 'INTRO' | 'TYPES' | `V:${DriverVehicleType}` | 'PERSON' | 'ID_FRONT' | 'ID_BACK' | 'FACE' | 'REVIEW';
 
 function Wizard({
@@ -206,24 +226,45 @@ function Wizard({
   onSent: () => void;
   onCancel?: () => void;
 }) {
-  const [selected, setSelected] = useState<DriverVehicleType[]>([]);
-  const [drafts, setDrafts] = useState<Partial<Record<DriverVehicleType, { model: string; photo?: string }>>>({});
-  const [person, setPerson] = useState({ fullName: '', idNumber: '' });
-  const [photos, setPhotos] = useState<{ idFront?: string; idBack?: string }>({});
-  const [idDescriptor, setIdDescriptor] = useState<Float32Array | null>(null);
-  const [face, setFace] = useState<{ facePhoto: string; liveFrame: string; distance: number; challenges: string[] } | null>(null);
+  const uid = useAppStore((st) => st.user?.id);
+  const draftKey = `ribergo-driver-draft:${uid ?? 'anon'}:${mode}`;
+  const [saved] = useState<Draft | null>(() => (typeof window === 'undefined' ? null : loadDraft(draftKey)));
+  const [selected, setSelected] = useState<DriverVehicleType[]>(saved?.selected ?? []);
+  const [drafts, setDrafts] = useState<Draft['drafts']>(saved?.drafts ?? {});
+  const [person, setPerson] = useState(saved?.person ?? { fullName: '', idNumber: '' });
+  const [photos, setPhotos] = useState<Draft['photos']>(saved?.photos ?? {});
+  const [idDescriptor, setIdDescriptor] = useState<Float32Array | null>(saved?.idDescriptor ? new Float32Array(saved.idDescriptor) : null);
+  const [face, setFace] = useState<Draft['face']>(saved?.face ?? null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const [attempts, setAttempts] = useState(0);
+  const [attempts, setAttempts] = useState(saved?.attempts ?? 0);
   const [sending, setSending] = useState(false);
-  const [stepId, setStepId] = useState<StepId>(mode === 'full' ? 'INTRO' : 'TYPES');
+  const [stepId, setStepId] = useState<StepId>(saved?.stepId ?? (mode === 'full' ? 'INTRO' : 'TYPES'));
+
+  // Guarda el avance (con un pequeño retraso, las fotos pesan) y evita recargas automáticas mientras tanto
+  useEffect(() => {
+    const w = window as unknown as { __ribergoBusy?: number };
+    w.__ribergoBusy = (w.__ribergoBusy ?? 0) + 1;
+    return () => { w.__ribergoBusy = Math.max(0, (w.__ribergoBusy ?? 1) - 1); };
+  }, []);
+  useEffect(() => {
+    const t = setTimeout(() => {
+      try {
+        const draft: Draft = { stepId, selected, drafts, person, photos, idDescriptor: idDescriptor ? Array.from(idDescriptor) : null, face, attempts };
+        localStorage.setItem(draftKey, JSON.stringify(draft));
+      } catch {
+        // sin espacio o sin almacenamiento: el registro sigue funcionando, solo no se guarda el avance
+      }
+    }, 400);
+    return () => clearTimeout(t);
+  }, [draftKey, stepId, selected, drafts, person, photos, idDescriptor, face, attempts]);
 
   const ordered = VEHICLE_OPTIONS.map((o) => o.type).filter((t) => selected.includes(t));
   const steps: StepId[] =
     mode === 'full'
       ? ['INTRO', 'TYPES', ...ordered.map((t) => `V:${t}` as const), 'PERSON', 'ID_FRONT', 'ID_BACK', 'FACE', 'REVIEW']
       : ['TYPES', ...ordered.map((t) => `V:${t}` as const), 'REVIEW'];
-  const index = Math.max(0, steps.indexOf(stepId));
+  const index = Math.max(0, steps.indexOf(stepId)); // si el paso guardado ya no existe, vuelve al primero
   const go = (s: StepId) => { setError(''); haptics.selection(); setStepId(s); };
   const next = () => go(steps[Math.min(index + 1, steps.length - 1)]);
   const back = () => (index > 0 ? go(steps[index - 1]) : onCancel?.());
@@ -297,7 +338,11 @@ function Wizard({
       res = await addVehicles(vehicleDrafts());
     }
     setSending(false);
-    if (res.ok) { haptics.success(); onSent(); } else setError(res.error || 'No se pudo enviar.');
+    if (res.ok) {
+      try { localStorage.removeItem(draftKey); } catch {}
+      haptics.success();
+      onSent();
+    } else setError(res.error || 'No se pudo enviar.');
   };
 
   const canContinue: Record<string, boolean> = {

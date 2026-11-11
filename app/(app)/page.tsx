@@ -33,7 +33,9 @@ export default function App() {
         // Nunca recargar en medio de un viaje: se aplica al terminar o al abrir la app de nuevo.
         const { activeTrip, passengerState, driverState } = useAppStore.getState();
         const inTrip = Boolean(activeTrip) || (passengerState !== 'IDLE' && passengerState !== 'LOCATION_READY' && passengerState !== 'LOCATION_LOADING') || !['OFFLINE', 'ONLINE', 'TRIP_COMPLETED'].includes(driverState);
-        if (inTrip) return;
+        // Tampoco mientras el conductor completa su registro (fotos en curso)
+        const busy = (window as unknown as { __ribergoBusy?: number }).__ribergoBusy ?? 0;
+        if (inTrip || busy > 0) return;
         refreshing = true;
         window.location.reload();
       });
