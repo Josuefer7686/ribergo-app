@@ -279,7 +279,7 @@ Colecciones de viajes interprovinciales y paquetería entre Riberalta y Guayaram
 - **Presencia de conductores:** `online_drivers/{id}.lastActive` se renueva con cada movimiento GPS y con un **latido cada 30 s** (`DriverHome` → `apiService.touchDriverPresence`). El mapa del pasajero **oculta** a quien lleve más de 2 min sin señal (`DRIVER_PRESENCE_TTL_MS`); el servidor borra a los de más de 5 min.
 - **Viajes:** al **cancelar**, el viaje queda como `CANCELLED` (con su chat) y se borra su copia de `active_requests`. Al **completar**, se actualiza `rides`, se escribe `trips_history` y se borra la copia de `active_requests`. Los pedidos activos sin movimiento por 3 h se marcan `CANCELLED` con `expired: true`.
 - **Limpieza automática:** [`lib/cleanup.ts`](lib/cleanup.ts) (`runCleanup`) corre a diario (cron) y a pedido con el botón **Limpiar datos viejos** del panel. Nunca borra usuarios, historial, mensajes ni dinero.
-- **Mantenimiento manual:** `node scripts/db-maintenance.mjs counts | backup | wipe --yes <colecciones> | reset-counters --yes`. `wipe` hace respaldo previo en `backups/` (ignorada por git) y nunca borra `users`.
+- **Mantenimiento manual:** `node scripts/db-maintenance.mjs counts | backup | wipe --yes <colecciones> | reset-all --yes | reset-counters --yes`. `reset-all` borra TODO (usuarios y cuentas de Firebase Auth incluidas, menos `system_config`) con respaldo previo; después sube `DATA_EPOCH` en `lib/appVersion.ts` para que los teléfonos cierren sesión y muestren el aviso de reinicio. `wipe` hace respaldo previo en `backups/` (ignorada por git) y nunca borra `users`.
 
 ---
 
@@ -374,3 +374,5 @@ curl -s "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/setWebhook" \
 - **Firebase Admin (servidor):** `lib/firebaseAdmin.ts` lee la credencial de `FIREBASE_SERVICE_ACCOUNT_B64` (JSON de la cuenta de servicio en base64). Lo usan el webhook y `request-topup`, porque el Admin SDK ignora las reglas. Sin esa variable ambas rutas responden 503.
 - **Riesgos que quedan (aceptados por ahora):** la comisión por viaje y las calificaciones se escriben desde el cliente (un conductor tramposo podría no descontarse la comisión o un pasajero manipular una calificación). Para blindarlo hay que moverlos a rutas de servidor.
 - Nunca subas tokens, claves ni `.env*` al repositorio. Si se filtra un token, revócalo en @BotFather (`/revoke`).
+
+- **Versión actual: 3.0** (`lib/appVersion.ts`: `APP_VERSION`, `DATA_EPOCH = 3`; SW `ribergo-v3.0`). Al abrir la app, si la cuenta guardada ya no existe en Firebase se cierra la sesión con el aviso de reinicio.
