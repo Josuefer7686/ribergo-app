@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAdminDb } from '@/lib/firebaseAdmin';
 import { isAdminRequest } from '@/lib/adminAuth';
-import { cleanText } from '@/lib/driverVerification';
+import { resolveVerification } from '@/lib/driverVerification';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -30,15 +30,6 @@ export async function POST(req: NextRequest) {
   const action = body.action === 'approve' ? 'approve' : body.action === 'reject' ? 'reject' : '';
   if (!id || !action) return NextResponse.json({ ok: false, error: 'Pedido inválido' }, { status: 400 });
 
-  const ref = db.collection('driver_verifications').doc(id);
-  if (!(await ref.get()).exists) return NextResponse.json({ ok: false, error: 'No existe la solicitud' }, { status: 404 });
-
-  if (action === 'approve') {
-    await ref.update({ status: 'APPROVED', rejectReason: '', resolvedAtMs: Date.now() });
-    await db.collection('users').doc(id).set({ verified: true }, { merge: true });
-  } else {
-    await ref.update({ status: 'REJECTED', rejectReason: cleanText(body.reason, 200) || 'Datos o fotos no válidos.', resolvedAtMs: Date.now() });
-    await db.collection('users').doc(id).set({ verified: false }, { merge: true });
-  }
-  return NextResponse.json({ ok: true });
+  const res = await resolveVerification(db, id, action, body.reason);
+  return NextResponse.json(res.ok ? { ok: true } : { ok: false, error: res.error }, { status: res.ok ? 200 : 404 });
 }

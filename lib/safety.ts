@@ -30,3 +30,33 @@ export async function notifyAdmin(text: string): Promise<void> {
     console.warn('No se pudo avisar por Telegram:', e);
   }
 }
+
+/** Manda las fotos de una verificación y el mensaje con botones [Aprobar] / [Rechazar]. */
+export async function notifyVerification(uid: string, summary: string, photos: { label: string; dataUrl: string }[]): Promise<void> {
+  if (!TELEGRAM_TOKEN || !TELEGRAM_ADMIN_CHAT_ID) return;
+  try {
+    const form = new FormData();
+    form.append('chat_id', TELEGRAM_ADMIN_CHAT_ID);
+    const media = photos.map((p, i) => {
+      const bytes = Buffer.from(p.dataUrl.split(',')[1], 'base64');
+      form.append(`photo${i}`, new Blob([bytes], { type: 'image/jpeg' }), `photo${i}.jpg`);
+      return { type: 'photo', media: `attach://photo${i}`, caption: p.label };
+    });
+    form.append('media', JSON.stringify(media));
+    await fetch(telegramApi('sendMediaGroup'), { method: 'POST', body: form });
+    await fetch(telegramApi('sendMessage'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        chat_id: TELEGRAM_ADMIN_CHAT_ID,
+        text: summary.slice(0, 3900),
+        reply_markup: { inline_keyboard: [[
+          { text: '✅ Aprobar', callback_data: `vok:${uid}` },
+          { text: '❌ Rechazar', callback_data: `vno:${uid}` },
+        ]] },
+      }),
+    });
+  } catch (e) {
+    console.warn('No se pudo enviar la verificación por Telegram:', e);
+  }
+}

@@ -1,4 +1,5 @@
 import 'server-only';
+import type { Firestore } from 'firebase-admin/firestore';
 
 export type VerificationStatus = 'NONE' | 'PENDING' | 'APPROVED' | 'REJECTED';
 
@@ -15,3 +16,24 @@ export function validImage(value: unknown, key: ImageKey): value is string {
 
 export const cleanText = (v: unknown, max: number) =>
   String(v ?? '').replace(/[\u0000-\u001f]/g, ' ').trim().slice(0, max);
+
+/** Aprueba o rechaza una verificación (lo usan el panel y los botones de Telegram). */
+export async function resolveVerification(
+  db: Firestore,
+  id: string,
+  action: 'approve' | 'reject',
+  reason = '',
+): Promise<{ ok: boolean; error?: string; fullName?: string; already?: string }> {
+  const ref = db.collection('driver_verifications').doc(id);
+  const snap = await ref.get();
+  if (!snap.exists) return { ok: false, error: 'No existe la solicitud' };
+  const data = snap.data() || {};
+  if (action === 'approve') {
+    await ref.update({ status: 'APPROVED', rejectReason: '', resolvedAtMs: Date.now() });
+    await db.collection('users').doc(id).set({ verified: true }, { merge: true });
+  } else {
+    await ref.update({ status: 'REJECTED', rejectReason: cleanText(reason, 200) || 'Datos o fotos no válidos.', resolvedAtMs: Date.now() });
+    await db.collection('users').doc(id).set({ verified: false }, { merge: true });
+  }
+  return { ok: true, fullName: data.fullName };
+}

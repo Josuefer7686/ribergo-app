@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { FieldValue } from 'firebase-admin/firestore';
+import { resolveVerification } from '@/lib/driverVerification';
 import { getAdminDb } from '@/lib/firebaseAdmin';
 import {
   TELEGRAM_TOKEN,
@@ -74,6 +75,36 @@ export async function POST(req: NextRequest) {
 
       if (!TELEGRAM_ADMIN_CHAT_ID || fromId !== TELEGRAM_ADMIN_CHAT_ID) {
         await answerCallback(callbackId, '⛔ No autorizado.');
+        return NextResponse.json({ ok: true });
+      }
+
+      // Botones de verificación de conductores
+      const [vAction, vId] = String(cq.data || '').split(':');
+      if ((vAction === 'vok' || vAction === 'vno') && vId && /^[A-Za-z0-9_-]{6,128}$/.test(vId)) {
+        const current = (await adminDb.collection('driver_verifications').doc(vId).get()).data();
+        if (current && current.status !== 'PENDING') {
+          await answerCallback(callbackId, `⚠️ Esta solicitud ya estaba ${current.status === 'APPROVED' ? 'aprobada' : 'rechazada'}.`);
+          return NextResponse.json({ ok: true });
+        }
+        const res = await resolveVerification(adminDb, vId, vAction === 'vok' ? 'approve' : 'reject', 'Rechazada por la administración. Vuelve a enviar fotos claras.');
+        if (!res.ok) {
+          await answerCallback(callbackId, '⚠️ No encontré esa solicitud.');
+          return NextResponse.json({ ok: true });
+        }
+        const approved = vAction === 'vok';
+        await answerCallback(callbackId, approved ? `✅ ${res.fullName || 'Conductor'} aprobado.` : '❌ Solicitud rechazada.');
+        if (chatId && messageId) {
+          await fetch(telegramApi('editMessageText'), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              chat_id: chatId,
+              message_id: messageId,
+              text: `${message.text ?? ''}\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n${approved ? '✅ CONDUCTOR APROBADO' : '❌ SOLICITUD RECHAZADA'}`,
+              reply_markup: { inline_keyboard: [] },
+            }),
+          }).catch(() => {});
+        }
         return NextResponse.json({ ok: true });
       }
 

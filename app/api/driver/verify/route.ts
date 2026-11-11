@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { FieldValue } from 'firebase-admin/firestore';
 import { getAdminDb } from '@/lib/firebaseAdmin';
-import { notifyAdmin, verifyCaller } from '@/lib/safety';
+import { notifyVerification, verifyCaller } from '@/lib/safety';
 import { IMAGE_KEYS, cleanText, validImage } from '@/lib/driverVerification';
 
 export const runtime = 'nodejs';
@@ -85,8 +85,15 @@ export async function POST(req: NextRequest) {
   });
   await db.collection('users').doc(uid).set({ fullName, vehicleModel, verified: false }, { merge: true });
 
-  await notifyAdmin(
-    `🪪 Nueva verificación de conductor\n\n${fullName}\nCarnet: ${idNumber}\nVehículo: ${vehicleModel}\nCoincidencia de rostro: ${matchLevel}${faceDistance !== null ? ` (${faceDistance})` : ''}\n\nRevísala y apruébala en /admin → Seguridad → Verificación de conductores.`
+  await notifyVerification(
+    uid,
+    `🪪 Nueva verificación de conductor\n\n${fullName}\nCarnet: ${idNumber}\nVehículo: ${vehicleModel}\nCoincidencia de rostro: ${matchLevel}${faceDistance !== null ? ` (${faceDistance})` : ''}\n\nMira las fotos de arriba y decide con los botones.`,
+    [
+      { label: `Rostro en vivo · ${fullName}`, dataUrl: body.liveFrame },
+      { label: 'Carnet (anverso)', dataUrl: body.idFront },
+      { label: 'Carnet (reverso)', dataUrl: body.idBack },
+      { label: `Vehículo · ${vehicleModel}`, dataUrl: body.vehiclePhoto },
+    ],
   );
   return NextResponse.json({ ok: true, status: 'PENDING' });
 }
