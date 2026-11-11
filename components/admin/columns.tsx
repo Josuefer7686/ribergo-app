@@ -36,6 +36,14 @@ const ridesCols: Col[] = [
 ];
 
 export const COLUMNS: Record<string, Col[]> = {
+  driver_verifications: [
+    { label: 'Pidió', render: when('createdAtMs', 'createdAt') },
+    { label: 'Estado', render: (d) => <StatusChip status={d.data.status} /> },
+    { label: 'Nombre completo', render: (d) => <span className="font-semibold">{d.data.fullName || '—'}</span> },
+    { label: 'Carnet', render: (d) => <span className="font-mono">{d.data.idNumber || '—'}</span> },
+    { label: 'Vehículo', render: (d) => d.data.vehicleModel || '—' },
+    { label: 'Rostro vs carnet', render: (d) => <Chip tone={d.data.faceMatch === 'OK' ? 'good' : 'warn'}>{d.data.faceMatch === 'OK' ? 'Coincide' : 'Revisar a mano'}{typeof d.data.faceDistance === 'number' ? ` · ${d.data.faceDistance}` : ''}</Chip> },
+  ],
   sos_alerts: [
     { label: 'Cuándo', render: when('createdAtMs', 'createdAt') },
     { label: 'Estado', render: () => <Chip tone="bad">SOS</Chip> },

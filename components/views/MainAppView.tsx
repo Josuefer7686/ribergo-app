@@ -15,8 +15,9 @@ import { IosLocationPermissionModal } from '@/components/modals/IosLocationPermi
 import { useAutoLocation } from '@/hooks/useAutoLocation';
 import { useWalletNotificationListener } from '@/hooks/useWalletNotificationListener';
 import { apiService } from '@/services/apiService';
+import { DriverVerificationGate } from '@/components/driver/DriverVerificationGate';
 
-export function MainAppView() {
+function MainAppInner() {
   const { role, activeTab, setActiveTab, activeTrip, assignedDriver, passengerState, driverState } = useAppStore();
   const [activeToast, setActiveToast] = useState<ToastMessageData | null>(null);
   const { activeBanner, handleCloseBanner } = useWalletNotificationListener();
@@ -130,3 +131,15 @@ export function MainAppView() {
   );
 }
 
+
+/** Los conductores entran a la app solo con identidad verificada. */
+export function MainAppView() {
+  const role = useAppStore((s) => s.role);
+  return role === 'DRIVER' ? (
+    <DriverVerificationGate>
+      <MainAppInner />
+    </DriverVerificationGate>
+  ) : (
+    <MainAppInner />
+  );
+}

@@ -29,6 +29,11 @@ export const GROUP_LABELS: Record<CollectionGroupId, string> = {
 
 export const ADMIN_COLLECTIONS: AdminCollection[] = [
   {
+    id: 'driver_verifications', path: 'driver_verifications', kind: 'collection', group: 'seguridad',
+    label: 'Verificación de conductores',
+    description: 'Solicitudes de los conductores con su carnet, foto del vehículo y rostro en vivo. Ábrela para ver las fotos y aprobar o rechazar.',
+  },
+  {
     id: 'sos_alerts', path: 'sos_alerts', kind: 'collection', group: 'seguridad',
     label: 'Alertas SOS',
     description: 'Cada vez que un pasajero pulsa el botón SOS durante un viaje: quién es, con qué conductor va, dónde está y los últimos mensajes.',

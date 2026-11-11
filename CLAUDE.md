@@ -119,6 +119,13 @@ Visor en vivo de Firestore en español, solo para el dueño. **Lee por el servid
 - **Reporte de chat** (`POST /api/safety/report`): el servidor copia el chat real, datos del reportado y fecha a `chat_reports` ("Observación en el chat"). Ambas colecciones son solo-servidor y se ven en `/admin` → Seguridad. Las rutas verifican el token de Firebase (`lib/safety.ts`).
 - **Mensajes**: el canal "Billetera & Finanzas" es solo para conductores. El chat de un viaje terminado queda de solo lectura (también en `firestore.rules`); se borra de la lista con pulsación larga (`hiddenChatIds`, solo local).
 
+### 3.6d. Verificación de conductores (identidad)
+- Los conductores **no entran a la app** hasta ser aprobados: [`DriverVerificationGate.tsx`](components/driver/DriverVerificationGate.tsx) envuelve `MainAppView` (asistente de 6 pasos: nombre completo, carnet, modelo de vehículo, foto del vehículo, carnet anverso/reverso, rostro en vivo).
+- Rostro: [`lib/faceEngine.ts`](lib/faceEngine.ts) (face-api.js cargado desde jsDelivr, en el teléfono). Prueba de vida con parpadeo + giro a ambos lados en orden aleatorio; compara el rostro con el del carnet (distancia ≤ 0.6; tras 3 intentos fallidos pasa marcada "Revisar a mano"). No es infalible: **la aprobación final es humana**.
+- Servidor (`/api/driver/verify`, `/api/driver/card`, `/api/admin/verification`): fotos en `driver_media` (vehículo y rostro) y `driver_id_docs` (carnet, solo admin); estado en `driver_verifications`. Aprobar/rechazar se hace en `/admin` → Seguridad → Verificación de conductores (única acción de escritura del panel); aprobar pone `users.verified = true`.
+- El pasajero ve foto del vehículo, rostro, nombre completo y modelo ([`DriverIdentityCard.tsx`](components/driver/DriverIdentityCard.tsx)) cuando un conductor aprueba acepta su viaje; solo los participantes del viaje pueden pedir esa tarjeta.
+- Sin placa por ahora (en Riberalta casi no existen).
+
 ### 3.7. Directorio `components/map/`
 - [`MapComponent.tsx`](components/map/MapComponent.tsx): Componente Leaflet con marcadores personalizados (pasajero, conductores cercanos, rutas trazadas y radio de búsqueda).
 - [`MapView.tsx`](components/map/MapView.tsx): Envoltorio cliente con importación dinámica (`next/dynamic` con `ssr: false`) para evitar errores de compilación del objeto `window` en Next.js.

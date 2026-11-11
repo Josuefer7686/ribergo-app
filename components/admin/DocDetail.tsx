@@ -32,6 +32,7 @@ const LABELS: Record<string, string> = {
   recipientName: 'Destinatario', recipientPhone: 'Teléfono del destinatario',
   packageDescription: 'Contenido', origin: 'Origen', deliveryAddress: 'Dirección de entrega',
   pickupAddress: 'Recoger en', destinationAddress: 'Llevar a', departureDate: 'Día de salida',
+  idNumber: 'Carnet de identidad', fullName: 'Nombre completo', faceDistance: 'Distancia de rostro (menor es mejor)', faceMatch: 'Rostro vs carnet', livenessChallenges: 'Pruebas en vivo', rejectReason: 'Motivo del rechazo', resolvedAtMs: 'Resuelta',
   reason: 'Motivo', note: 'Comentario', title: 'Tipo', rideId: 'Viaje (código)',
   reporterId: 'Quien reporta (código)', reporterName: 'Quien reporta', reporterPhone: 'Teléfono de quien reporta', reporterRole: 'Rol de quien reporta',
   reportedId: 'Reportado (código)', reportedName: 'Reportado', reportedPhone: 'Teléfono del reportado', reportedRole: 'Rol del reportado',
@@ -97,6 +98,68 @@ function renderValue(key: string, v: any, names: Names): ReactNode {
   return String(v);
 }
 
+const IMAGE_LABELS: [string, string][] = [
+  ['liveFrame', 'Rostro en vivo'], ['idFront', 'Carnet (anverso)'], ['idBack', 'Carnet (reverso)'], ['vehiclePhoto', 'Vehículo'],
+];
+
+function VerificationReview({ id, status }: { id: string; status: string }) {
+  const [images, setImages] = useState<Record<string, string> | null>(null);
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [reason, setReason] = useState('');
+  const [done, setDone] = useState('');
+
+  useEffect(() => {
+    let alive = true;
+    fetch(`/api/admin/verification?id=${encodeURIComponent(id)}`)
+      .then((r) => r.json())
+      .then((j) => alive && (j.ok ? setImages(j.images) : setError('No se pudieron cargar las fotos.')))
+      .catch(() => alive && setError('No se pudieron cargar las fotos.'));
+    return () => { alive = false; };
+  }, [id]);
+
+  const act = async (action: 'approve' | 'reject') => {
+    setBusy(true);
+    const r = await fetch('/api/admin/verification', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, action, reason }),
+    }).then((x) => x.json()).catch(() => ({ ok: false }));
+    setBusy(false);
+    setDone(r.ok ? (action === 'approve' ? 'Conductor aprobado.' : 'Solicitud rechazada.') : 'No se pudo guardar. Intenta otra vez.');
+  };
+
+  return (
+    <section className="mb-5 space-y-4 rounded-xl border border-gold-primary/30 bg-background p-4">
+      <h3 className="font-display text-base font-extrabold">Fotos para revisar</h3>
+      {error && <p className="text-sm text-rose-300">{error}</p>}
+      {!images && !error && <p className="text-sm text-text-secondary">Cargando fotos…</p>}
+      {images && (
+        <div className="grid grid-cols-2 gap-3">
+          {IMAGE_LABELS.map(([k, label]) => (
+            <figure key={k} className="space-y-1">
+              {images[k] ? (
+                <a href={images[k]} target="_blank" rel="noreferrer"><img src={images[k]} alt={label} className="aspect-[4/3] w-full rounded-lg border border-white/10 object-cover" /></a>
+              ) : <div className="aspect-[4/3] rounded-lg border border-white/10" />}
+              <figcaption className="text-xs text-text-secondary">{label}</figcaption>
+            </figure>
+          ))}
+        </div>
+      )}
+      {done ? (
+        <p className="text-sm font-semibold text-emerald-300">{done}</p>
+      ) : status === 'PENDING' || status === 'REJECTED' || status === 'APPROVED' ? (
+        <div className="space-y-2">
+          <input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Motivo si lo rechazas (lo verá el conductor)" className="h-10 w-full rounded-lg border border-white/10 bg-surface px-3 text-sm" />
+          <div className="flex gap-2">
+            <button disabled={busy} onClick={() => act('approve')} className="h-10 flex-1 rounded-lg bg-emerald-500 text-sm font-bold text-black disabled:opacity-50">Aprobar</button>
+            <button disabled={busy} onClick={() => act('reject')} className="h-10 flex-1 rounded-lg bg-rose-500 text-sm font-bold text-white disabled:opacity-50">Rechazar</button>
+          </div>
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
 interface Props {
   doc: AdminDoc;
   title: string;
@@ -148,6 +211,8 @@ export function DocDetail({ doc, title, names, onClose }: Props) {
               Datos técnicos
             </button>
           </div>
+
+          {doc.path.startsWith('driver_verifications/') && <VerificationReview id={doc.id} status={String(doc.data.status)} />}
 
           {raw ? (
             <pre className="overflow-x-auto rounded-xl border border-white/10 bg-background p-4 font-mono text-xs leading-relaxed text-text-secondary">

@@ -12,6 +12,7 @@ import { ServicePicker } from '@/components/passenger/ServicePicker';
 import { OfferStepper } from '@/components/passenger/OfferStepper';
 import { BottomSheet } from '@/components/passenger/BottomSheet';
 import { SosButton } from '@/components/passenger/SosButton';
+import { DriverIdentityCard, useDriverCard } from '@/components/driver/DriverIdentityCard';
 import { 
   Bike, Navigation, Search, MapPin, Star, MessageSquare, X, Check, Clock, DollarSign, Shield, ChevronRight, AlertCircle,
   QrCode, Sparkles, TrendingUp, Flame, Compass, ShieldCheck, Bell, Crosshair
@@ -49,6 +50,7 @@ export const PassengerHome = () => {
   const [customOffer, setCustomOffer] = useState<number | null>(null);
   const [infoBubble, setInfoBubble] = useState<'MOTOCAR' | 'TAXI_AUTO' | null>(null);
   const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<'CASH' | 'QR'>('CASH');
+  const driverCard = useDriverCard(activeTrip?.driver || assignedDriver ? activeTrip?.id : null);
   const [qrPaymentSent, setQrPaymentSent] = useState(false);
 
   // References to prevent infinite state re-render loops
@@ -662,7 +664,11 @@ export const PassengerHome = () => {
                 <span className="text-xs font-semibold text-text-secondary">Llega en ~2 min</span>
               </div>
 
-              {/* Driver Details Card */}
+              {/* Tarjeta verificada: foto del vehículo, rostro y nombre completo */}
+              {driverCard?.verified ? (
+                <DriverIdentityCard card={driverCard} rating={assignedDriver.rating} trips={assignedDriver.trips} />
+              ) : (
+                <>
               <div className="flex items-center gap-3.5">
                 <img
                   src={assignedDriver.avatar}
@@ -692,6 +698,9 @@ export const PassengerHome = () => {
                   </div>
                 </div>
               </div>
+
+                </>
+              )}
 
               {/* Driver En Route Status Notice */}
               <div className={`flex items-center gap-2 p-2.5 rounded-xl border text-xs ${
@@ -759,6 +768,8 @@ export const PassengerHome = () => {
                   {activeTrip?.serviceType === 'REMOLCADA' ? 'Hacia destino o taller' : 'En camino al destino'}
                 </span>
               </div>
+
+              {driverCard?.verified && <DriverIdentityCard card={driverCard} compact />}
 
               <div className="p-3 rounded-2xl bg-surface-2 border border-border-custom text-xs space-y-1.5">
                 <p className="text-text-secondary">Destino: <span className="text-white font-bold">{destination?.name}</span></p>
