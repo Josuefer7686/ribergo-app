@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { useAppStore } from '@/store/useAppStore';
 import { usePwa } from '@/utils/pwa';
 import { Download, Smartphone, X } from 'lucide-react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion, AnimatePresence } from 'motion/react';
 
 export const PwaInstallBanner = () => {
   const { deferredPwaPrompt, setDeferredPwaPrompt } = useAppStore();

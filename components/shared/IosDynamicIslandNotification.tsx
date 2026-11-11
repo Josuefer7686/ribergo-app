@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion, AnimatePresence } from 'motion/react';
 import { Wallet, Sparkles, X, ChevronRight, CheckCircle2, AlertTriangle } from 'lucide-react';
 import { haptics } from '@/utils/haptics';
 import { audio } from '@/utils/audio';

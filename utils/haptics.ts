@@ -28,6 +28,20 @@ export const haptics = {
   },
 
   /**
+   * Oleada decreciente: el panel se esconde (28 → 8 ms)
+   */
+  sheetClose: () => {
+    triggerVibrate([28, 25, 16, 25, 8]);
+  },
+
+  /**
+   * Oleada creciente: el panel vuelve a subir (8 → 28 ms)
+   */
+  sheetOpen: () => {
+    triggerVibrate([8, 25, 16, 25, 28]);
+  },
+
+  /**
    * Heavy rhythmic pulse (35ms, 40ms pause, 20ms)
    * Use for primary MOTOTAXI button, confirm trip, start ride
    */

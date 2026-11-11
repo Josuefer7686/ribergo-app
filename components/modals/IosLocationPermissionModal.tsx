@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion, AnimatePresence } from 'motion/react';
 import { Navigation, MapPin, AlertCircle, ShieldAlert, ChevronDown, Copy, Check, ExternalLink, RefreshCw } from 'lucide-react';
 import { haptics } from '@/utils/haptics';
 

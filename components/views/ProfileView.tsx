@@ -7,7 +7,7 @@ import {
   User, Bike, CreditCard, Bell, Shield, Settings, HelpCircle, LogOut, ChevronRight, Star, 
   Check, Smartphone, Lock, AlertTriangle, ExternalLink, QrCode, DollarSign, MessageCircle 
 } from 'lucide-react';
-import { motion } from 'framer-motion';
+import { motion } from 'motion/react';
 import { haptics } from '@/utils/haptics';
 import { audio } from '@/utils/audio';
 import { notifications } from '@/utils/notifications';

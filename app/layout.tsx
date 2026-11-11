@@ -1,5 +1,9 @@
 import type {Metadata, Viewport} from 'next';
+import { Bricolage_Grotesque, Figtree } from 'next/font/google';
 import './globals.css';
+
+const display = Bricolage_Grotesque({ subsets: ['latin'], variable: '--nf-display', display: 'swap' });
+const sans = Figtree({ subsets: ['latin'], variable: '--nf-sans', display: 'swap' });
 
 export const metadata: Metadata = {
   title: 'RiberGO - Mototaxis a un toque',
@@ -38,7 +42,7 @@ export const viewport: Viewport = {
 
 export default function RootLayout({children}: {children: React.ReactNode}) {
   return (
-    <html lang="es">
+    <html lang="es" className={`${display.variable} ${sans.variable}`}>
       <head>
         <link rel="manifest" href="/manifest.json?v=2.1" />
         <meta name="theme-color" content="#05080B" />

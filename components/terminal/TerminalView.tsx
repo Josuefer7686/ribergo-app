@@ -2,7 +2,7 @@
 
 import { useAppStore } from '@/store/useAppStore';
 import { Bus, Sparkles, Clock, ArrowLeft, ShieldCheck, Construction } from 'lucide-react';
-import { motion } from 'framer-motion';
+import { motion } from 'motion/react';
 import { haptics } from '@/utils/haptics';
 
 export const TerminalView = () => {

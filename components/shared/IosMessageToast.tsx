@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion, AnimatePresence } from 'motion/react';
 import { MessageSquare, X, ChevronRight } from 'lucide-react';
 import { useAppStore } from '@/store/useAppStore';
 import { audio } from '@/utils/audio';

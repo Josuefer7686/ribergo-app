@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { motion } from 'framer-motion';
+import { motion } from 'motion/react';
 import { Delete, ArrowRight, Check } from 'lucide-react';
 import { haptics } from '@/utils/haptics';
 import { audio } from '@/utils/audio';

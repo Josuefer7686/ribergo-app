@@ -7,7 +7,7 @@ import { Smartphone, Sparkles, Check, AlertCircle, ArrowRight, ShieldCheck, Zap,
 import { haptics } from '@/utils/haptics';
 import { IosToastOverlay } from '@/components/shared/IosToastOverlay';
 import { IosSpinner } from '@/components/shared/IosSpinner';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion, AnimatePresence } from 'motion/react';
 
 export const LoginView = () => {
   const { setCurrentView, loginUser } = useAppStore();

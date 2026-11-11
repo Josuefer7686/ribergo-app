@@ -6,7 +6,7 @@ import {
   Send, Sparkles, DollarSign, Check, X, 
   Bike, User, Plus, Minus
 } from 'lucide-react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion, AnimatePresence } from 'motion/react';
 import { haptics } from '@/utils/haptics';
 import { audio } from '@/utils/audio';
 import { apiService } from '@/services/apiService';

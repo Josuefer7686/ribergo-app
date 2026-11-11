@@ -2,7 +2,7 @@
 
 import { useAppStore } from '@/store/useAppStore';
 import { Bike, Calendar, MapPin, Star, Clock } from 'lucide-react';
-import { motion } from 'framer-motion';
+import { motion } from 'motion/react';
 
 export const TripsView = () => {
   const { tripsHistory } = useAppStore();

@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { IosModal } from '@/components/shared/IosModal';
 import { useAppStore } from '@/store/useAppStore';
 import { Gift, DollarSign, Zap, QrCode, ChevronRight, ChevronLeft, Check, Sparkles, Bike } from 'lucide-react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion, AnimatePresence } from 'motion/react';
 import { haptics } from '@/utils/haptics';
 import { audio } from '@/utils/audio';
 import { apiService } from '@/services/apiService';

@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion, AnimatePresence } from 'motion/react';
 import { IosSpinner } from './IosSpinner';
 import { haptics } from '@/utils/haptics';
 import { audio } from '@/utils/audio';

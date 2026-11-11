@@ -6,12 +6,16 @@ import { apiService } from '@/services/apiService';
 import { haptics } from '@/utils/haptics';
 import { audio } from '@/utils/audio';
 import { MapView } from '@/components/map/MapView';
-import { RIBERALTA_DESTINATIONS, DestinationOption } from '@/services/mockData';
+import { DESTINATION_IN_PERSON, DestinationOption } from '@/services/mockData';
+import { DestinationSearch } from '@/components/passenger/DestinationSearch';
+import { ServicePicker } from '@/components/passenger/ServicePicker';
+import { BottomSheet } from '@/components/passenger/BottomSheet';
+import { SafetyBanner } from '@/components/passenger/SafetyBanner';
 import { 
   Bike, Navigation, Search, MapPin, Star, MessageSquare, X, Check, Clock, DollarSign, Shield, ChevronRight, AlertCircle,
-  QrCode, Sparkles, TrendingUp, Flame, Compass, ShieldCheck
+  QrCode, Sparkles, TrendingUp, Flame, Compass, ShieldCheck, Bell, Crosshair
 } from 'lucide-react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion, AnimatePresence } from 'motion/react';
 
 import { TerminalView } from '@/components/terminal/TerminalView';
 import { NegotiationChatModal } from '@/components/modals/NegotiationChatModal';
@@ -39,7 +43,6 @@ export const PassengerHome = () => {
 
   const { locationError, requestLocation } = useAutoLocation();
 
-  const [searchQuery, setSearchQuery] = useState('');
   const [rating, setRating] = useState(5);
   const [reviewText, setReviewText] = useState('');
   const [customOffer, setCustomOffer] = useState<number | null>(null);
@@ -124,16 +127,30 @@ export const PassengerHome = () => {
     onlineDrivers.find((d) => d.id === selectedDriverId) || null;
 
 
-  // Select Destination
-  const handleSelectDestination = (dest: DestinationOption) => {
+  // Destination search handlers
+  const handlePickDestination = (dest: DestinationOption) => {
     haptics.impact();
-    setDestination({
-      lat: dest.lat,
-      lng: dest.lng,
-      name: dest.name,
-      address: dest.address,
-    });
+    setDestination({ lat: dest.lat, lng: dest.lng, name: dest.name, address: dest.address });
+  };
+
+  const handleClearDestination = () => {
+    setDestination(null);
+    if (passengerState === 'CONFIRMING') setPassengerState('IDLE');
+  };
+
+  const handleGoToDestination = () => {
+    if (!destination) return;
+    if (destination.name === DESTINATION_IN_PERSON.name) {
+      handleStartBooking();
+      return;
+    }
+    setCustomOffer(null);
     setPassengerState('CONFIRMING');
+  };
+
+  const handleChangeDestination = () => {
+    haptics.selection();
+    setPassengerState('IDLE');
   };
 
   // Listen to real-time updates for active trip (No infinite loop)
@@ -313,9 +330,19 @@ export const PassengerHome = () => {
     resetRide();
   };
 
-  const filteredDestinations = RIBERALTA_DESTINATIONS.filter(d => 
-    d.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    d.address.toLowerCase().includes(searchQuery.toLowerCase())
+  const isIdle =
+    passengerState === 'IDLE' || passengerState === 'LOCATION_READY' || passengerState === 'LOCATION_LOADING';
+  const isPlanning = isIdle || passengerState === 'CONFIRMING';
+
+  const gpsButton = (
+    <button
+      onClick={handleFetchLocation}
+      className="pointer-events-auto w-14 h-14 rounded-full bg-background/90 border border-white/20 text-white shadow-[0_8px_24px_-6px_rgba(0,0,0,0.8)] flex items-center justify-center transition active:scale-90"
+      title="Centrar en mi ubicación"
+      aria-label="Centrar en mi ubicación"
+    >
+      <Crosshair className="w-6 h-6" />
+    </button>
   );
 
   const isTerminalMode = activeTransportMode === 'TERMINAL_INTERPROVINCIAL';
@@ -364,60 +391,57 @@ export const PassengerHome = () => {
         <MapView />
       </div>
 
-      {/* Top Floating Header Branding, Mode Switcher & Location Alert */}
-      <div className="relative z-10 pt-safe px-4 pt-4 pointer-events-none space-y-2.5 max-w-sm mx-auto w-full">
-        <div className="flex items-center justify-between pointer-events-auto">
-          <div className="flex items-center gap-2 px-3 py-1.5 rounded-2xl bg-surface/90 border border-gold-primary/30 backdrop-blur-md shadow-lg">
-            <img
-              src="/logo.png"
-              alt="RiberGO Logo"
-              className="w-5 h-5 object-contain rounded-md"
-            />
-            <span className="text-sm font-black tracking-tight">
-              <span className="text-white">Riber</span>
-              <span className="text-gold-primary">GO</span>
-            </span>
+      {/* Top: marca, notificaciones y buscador de destino */}
+      <div className="relative z-30 px-4 pt-[max(1rem,env(safe-area-inset-top))] pointer-events-none space-y-3 max-w-[430px] mx-auto w-full">
+        <div className="flex items-center justify-between gap-3 pointer-events-auto">
+          <div className="flex items-center gap-2.5 min-w-0 py-1.5 pl-1.5 pr-4 rounded-2xl bg-gold-primary shadow-[0_8px_20px_-8px_rgba(255,198,26,0.6)]">
+            <img src="/logo.png" alt="" className="w-10 h-10 object-contain shrink-0 rounded-xl" />
+            <div className="min-w-0 leading-none">
+              <p className="font-display text-[24px] font-extrabold italic tracking-tight text-background">
+                RIBER GO
+              </p>
+              <p className="text-xs font-semibold text-background/80 mt-1 truncate">Tu transporte, más cerca</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              onClick={() => {
+                haptics.selection();
+                setActiveTransportMode('TERMINAL_INTERPROVINCIAL');
+              }}
+              aria-label="Terminal interprovincial"
+              title="Terminal interprovincial"
+              className="w-11 h-11 rounded-full bg-surface border border-white/10 flex items-center justify-center text-gold-primary active:scale-95 transition"
+            >
+              <Bus className="w-5 h-5" />
+            </button>
+            <button
+              onClick={() => {
+                haptics.selection();
+                setActiveTab('MESSAGES');
+              }}
+              aria-label="Notificaciones y mensajes"
+              className="w-11 h-11 rounded-full bg-surface border border-white/10 flex items-center justify-center text-white active:scale-95 transition"
+            >
+              <Bell className="w-5 h-5" />
+            </button>
           </div>
         </div>
 
-        {/* Top Transport Mode Selector Pill */}
-        <div className="pointer-events-auto grid grid-cols-2 gap-1.5 p-1 rounded-2xl bg-surface/90 border border-gold-primary/30 backdrop-blur-md shadow-xl text-xs font-black">
-          <button
-            onClick={() => {
-              haptics.selection();
-              setActiveTransportMode('URBAN_MOTOTAXI');
-            }}
-            className={`py-2 rounded-xl transition flex items-center justify-center gap-1.5 ${
-              !isTerminalMode
-                ? 'bg-gold-primary text-background shadow-md shadow-gold-primary/20'
-                : 'text-text-secondary hover:text-white'
-            }`}
-          >
-            <Bike className="w-3.5 h-3.5" />
-            <span>Mototaxi Urbana</span>
-          </button>
-
-          <button
-            onClick={() => {
-              haptics.selection();
-              setActiveTransportMode('TERMINAL_INTERPROVINCIAL');
-            }}
-            className={`py-2 rounded-xl transition flex items-center justify-center gap-1.5 ${
-              isTerminalMode
-                ? 'bg-gold-primary text-background shadow-md shadow-gold-primary/20'
-                : 'text-text-secondary hover:text-white'
-            }`}
-          >
-            <Bus className="w-3.5 h-3.5" />
-            <span>Terminal (Guayará)</span>
-          </button>
-        </div>
+        {isPlanning && (
+          <DestinationSearch
+            selected={destination}
+            onSelect={handlePickDestination}
+            onClear={handleClearDestination}
+            onGo={handleGoToDestination}
+          />
+        )}
 
         {locationError && (
           <motion.div
             initial={{ opacity: 0, y: -10 }}
             animate={{ opacity: 1, y: 0 }}
-            className="p-2.5 rounded-xl bg-surface-2/95 border border-gold-primary/30 backdrop-blur-md text-xs text-gold-light flex items-center gap-2 pointer-events-auto"
+            className="p-3 rounded-xl bg-surface-2 border border-gold-primary/30 text-sm text-gold-light flex items-center gap-2 pointer-events-auto"
           >
             <AlertCircle className="w-4 h-4 text-gold-primary shrink-0" />
             <span>{locationError}</span>
@@ -425,236 +449,138 @@ export const PassengerHome = () => {
         )}
       </div>
 
-      {/* FLOATING GPS RECENTER BUTTON (UBICACIÓN EN VIVO) */}
-      <div className="relative z-20 px-4 w-full max-w-[430px] mx-auto flex justify-end pointer-events-none mb-2.5 mt-auto">
-        <button
-          onClick={handleFetchLocation}
-          className="pointer-events-auto p-3.5 rounded-2xl bg-surface/95 border-2 border-gold-primary/60 text-gold-primary shadow-[0_12px_30px_rgba(0,0,0,0.85),0_0_20px_rgba(244,197,66,0.35)] backdrop-blur-xl flex items-center justify-center transition active:scale-90 hover:bg-surface hover:border-gold-primary group"
-          title="Centrar en mi ubicación GPS"
-          aria-label="Centrar en mi ubicación GPS"
-        >
-          <Navigation className="w-5 h-5 group-hover:scale-110 transition stroke-[2.3]" />
-        </button>
-      </div>
+      {/* Botón de recentrar (fuera del panel solo cuando no hay panel arrastrable) */}
+      {!isPlanning && (
+        <div className="relative z-20 px-4 w-full max-w-[430px] mx-auto flex justify-end pointer-events-none mb-3 mt-auto">
+          <div className="pointer-events-auto">{gpsButton}</div>
+        </div>
+      )}
 
       {/* Bottom Sheet Panels */}
-      <div className="relative z-10 pb-safe px-4 pb-4 w-full max-w-[430px] mx-auto">
+      <div className="relative z-10 px-4 pb-[max(1rem,env(safe-area-inset-bottom))] w-full max-w-[430px] mx-auto">
         <AnimatePresence mode="wait">
           {/* STATE 1: IDLE / LOCATION_READY */}
-          {(passengerState === 'IDLE' || passengerState === 'LOCATION_READY' || passengerState === 'LOCATION_LOADING') && (
-            <motion.div
+          {isIdle && (
+            <BottomSheet
               key="idle"
-              initial={{ y: 50, opacity: 0 }}
-              animate={{ y: 0, opacity: 1 }}
-              exit={{ y: 50, opacity: 0 }}
-              className="p-5 rounded-3xl bg-surface/95 border border-border-custom backdrop-blur-xl shadow-2xl space-y-4"
-            >
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2 text-xs text-text-secondary">
-                  <MapPin className="w-3.5 h-3.5 text-gold-primary" />
-                  <span className="truncate max-w-[220px]">
-                    {currentLocation ? currentLocation.name : 'Obteniendo GPS...'}
+              floating={gpsButton}
+              title={<h2 className="font-display text-xl font-extrabold text-white whitespace-nowrap">Servicios disponibles</h2>}
+              footer={
+                <button
+                  onClick={handleStartBooking}
+                  className="w-full h-14 rounded-2xl bg-gold-primary text-background font-black text-base flex items-center justify-center gap-2.5 shadow-[0_10px_24px_-8px_rgba(255,198,26,0.55)] transition active:scale-[0.98]"
+                >
+                  <VehicleIcon type={urbanServiceType} className="w-5 h-5 stroke-[2.4]" />
+                  <span>
+                    {urbanServiceType === 'REMOLCADA'
+                      ? 'Pedir auxilio / remolcada'
+                      : urbanServiceType === 'MOTOCAR'
+                      ? 'Pedir Motocar'
+                      : urbanServiceType === 'TAXI_AUTO'
+                      ? 'Pedir Taxi Auto'
+                      : 'Pedir Mototaxi'}
                   </span>
-                </div>
-                <span className="px-2 py-0.5 rounded-full bg-gold-primary/10 border border-gold-primary/30 text-[10px] font-bold text-gold-primary uppercase">
-                  Riberalta
-                </span>
-              </div>
+                </button>
+              }
+            >
+              <ServicePicker
+                value={urbanServiceType}
+                onChange={(s) => setUrbanServiceType(s)}
+                getFare={getBaseFare}
+              />
 
-              {/* VEHICLE / URBAN SERVICE TYPE SELECTOR (MOTOTAXI, MOTOCAR, TAXI AUTO, REMOLCADA) */}
-              <div className="space-y-2">
-                <div className="grid grid-cols-3 gap-2 p-1.5 rounded-2xl bg-surface-2 border border-border-custom">
-                  {/* Option 1: MOTOTAXI */}
-                  <button
-                    onClick={() => {
-                      haptics.selection();
-                      setUrbanServiceType('MOTOTAXI');
-                      setInfoBubble(null);
-                    }}
-                    className={`py-2.5 px-1.5 rounded-xl transition flex flex-col items-center justify-center gap-1.5 text-center ${
-                      urbanServiceType === 'MOTOTAXI'
-                        ? 'bg-gold-primary text-background font-black shadow-md shadow-gold-primary/25'
-                        : 'text-text-secondary hover:text-white font-bold'
-                    }`}
-                  >
-                    <VehicleIcon type="MOTOTAXI" className="w-5 h-5 stroke-[2.2]" />
-                    <span className="text-[11px] leading-tight font-extrabold">Mototaxi</span>
-                  </button>
-
-                  {/* Option 2: MOTOCAR (CARGA & FLETES) */}
-                  <div className="relative">
-                    <button
-                      onClick={() => {
-                        haptics.selection();
-                        setUrbanServiceType('MOTOCAR');
-                      }}
-                      className={`w-full py-2.5 px-1.5 rounded-xl transition flex flex-col items-center justify-center gap-1.5 text-center ${
-                        urbanServiceType === 'MOTOCAR'
-                          ? 'bg-gold-primary text-background font-black shadow-md shadow-gold-primary/25'
-                          : 'text-text-secondary hover:text-white font-bold'
-                      }`}
-                    >
-                      <VehicleIcon type="MOTOCAR" className="w-5 h-5 stroke-[2.2]" />
-                      <span className="text-[11px] leading-tight font-extrabold">Motocar</span>
-                    </button>
-                    {/* Botón redondo de información (i) */}
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        haptics.selection();
-                        setInfoBubble(infoBubble === 'MOTOCAR' ? null : 'MOTOCAR');
-                      }}
-                      title="Información de Motocar"
-                      aria-label="Información de Motocar"
-                      className={`absolute top-1 right-1 p-1 rounded-full transition ${
-                        urbanServiceType === 'MOTOCAR'
-                          ? 'text-background hover:bg-black/15'
-                          : 'text-gold-primary hover:bg-white/10'
-                      }`}
-                    >
-                      <Info className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-
-                  {/* Option 3: TAXI AUTO */}
-                  <div className="relative">
-                    <button
-                      onClick={() => {
-                        haptics.selection();
-                        setUrbanServiceType('TAXI_AUTO');
-                      }}
-                      className={`w-full py-2.5 px-1.5 rounded-xl transition flex flex-col items-center justify-center gap-1.5 text-center ${
-                        urbanServiceType === 'TAXI_AUTO'
-                          ? 'bg-gold-primary text-background font-black shadow-md shadow-gold-primary/25'
-                          : 'text-text-secondary hover:text-white font-bold'
-                      }`}
-                    >
-                      <VehicleIcon type="TAXI_AUTO" className="w-5 h-5 stroke-[2.2]" />
-                      <span className="text-[11px] leading-tight font-extrabold">Taxi Auto</span>
-                    </button>
-                    {/* Botón redondo de información (i) */}
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        haptics.selection();
-                        setInfoBubble(infoBubble === 'TAXI_AUTO' ? null : 'TAXI_AUTO');
-                      }}
-                      title="Información de Taxi Auto"
-                      aria-label="Información de Taxi Auto"
-                      className={`absolute top-1 right-1 p-1 rounded-full transition ${
-                        urbanServiceType === 'TAXI_AUTO'
-                          ? 'text-background hover:bg-black/15'
-                          : 'text-gold-primary hover:bg-white/10'
-                      }`}
-                    >
-                      <Info className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-                </div>
-
-                {/* GLOBITO INFORMATIVO TIPO TOOLTIP/POPOVER */}
-                <AnimatePresence>
-                  {infoBubble && (
-                    <motion.div
-                      initial={{ opacity: 0, scale: 0.95, y: -4 }}
-                      animate={{ opacity: 1, scale: 1, y: 0 }}
-                      exit={{ opacity: 0, scale: 0.95, y: -4 }}
-                      className="relative p-3 rounded-2xl bg-surface-2 border border-gold-primary/50 text-white text-xs shadow-xl backdrop-blur-xl flex items-start gap-2.5"
-                    >
-                      <div className="w-6 h-6 rounded-full bg-gold-primary/20 text-gold-primary flex items-center justify-center shrink-0 mt-0.5">
-                        <Info className="w-3.5 h-3.5" />
-                      </div>
-                      <div className="flex-1 pr-1">
-                        <p className="font-bold text-gold-light text-[12px]">
-                          {infoBubble === 'MOTOCAR' ? 'Motocar (Carga y Fletes)' : 'Taxi en Automóvil'}
-                        </p>
-                        <p className="text-[11px] text-text-secondary leading-snug mt-0.5">
-                          {infoBubble === 'MOTOCAR'
-                            ? 'Ideal para trasladar cosas pesadas, muebles pequeños, encomiendas o compras de mercado por Riberalta.'
-                            : 'Viaja con mayor confort, protección contra sol o lluvia y espacio para equipaje o acompañantes.'}
-                        </p>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => setInfoBubble(null)}
-                        className="p-1 rounded-lg text-text-secondary hover:text-white hover:bg-white/10 transition shrink-0"
-                        title="Cerrar"
-                      >
-                        <X className="w-3.5 h-3.5" />
-                      </button>
-                    </motion.div>
-                  )}
-                </AnimatePresence>
-
-                {/* Secondary SOS Option: AUXILIO MECÁNICO / REMOLQUE (Solo visible para Mototaxi) */}
-                {(urbanServiceType === 'MOTOTAXI' || urbanServiceType === 'REMOLCADA') && (
-                  <button
-                    onClick={() => {
-                      haptics.selection();
-                      setUrbanServiceType(urbanServiceType === 'REMOLCADA' ? 'MOTOTAXI' : 'REMOLCADA');
-                    }}
-                    className={`w-full py-2 px-3 rounded-xl border text-xs flex items-center justify-between transition ${
-                      urbanServiceType === 'REMOLCADA'
-                        ? 'bg-gradient-to-r from-amber-500/20 via-yellow-500/20 to-amber-500/20 border-amber-500 text-amber-300 font-extrabold shadow-sm'
-                        : 'bg-surface-2/60 hover:bg-surface-2 border-border-custom text-text-secondary hover:text-white font-semibold'
-                    }`}
-                  >
-                    <div className="flex items-center gap-2">
-                      <Wrench className={`w-3.5 h-3.5 ${urbanServiceType === 'REMOLCADA' ? 'text-amber-400' : 'text-text-secondary'}`} />
-                      <span>¿Moto varada? Auxilio / Remolcada con pie</span>
-                    </div>
-                  </button>
-                )}
-              </div>
-
-              {/* REMOLCADA BANNER NOTICE (Solo si está activo el modo remolcada) */}
+              {/* REMOLCADA BANNER NOTICE */}
               {urbanServiceType === 'REMOLCADA' && (
-                <div className="p-3 rounded-2xl bg-amber-500/15 border border-amber-500/40 text-amber-200 text-xs flex items-start gap-2.5 animate-in fade-in duration-200">
+                <div className="p-3 rounded-2xl bg-amber-500/15 border border-amber-500/40 text-amber-200 text-sm flex items-start gap-2.5 animate-in fade-in duration-200">
                   <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
                   <div>
                     <p className="font-bold text-white">Servicio de Auxilio Mecánico</p>
-                    <p className="text-[11px] text-amber-200/80 leading-snug">
+                    <p className="text-xs text-amber-200/80 leading-snug">
                       Un mototaxista vendrá a tu ubicación y remolcará tu motocicleta con el pie hasta tu casa o taller en Riberalta.
                     </p>
                   </div>
                 </div>
               )}
 
-              {/* MAIN BOOKING BUTTON */}
-              <button
-                onClick={handleStartBooking}
-                className={`w-full py-4 rounded-2xl font-black text-base flex items-center justify-center gap-3 shadow-xl transition active:scale-[0.98] group ${
-                  urbanServiceType === 'REMOLCADA'
-                    ? 'bg-gradient-to-r from-amber-500 via-gold-primary to-yellow-500 text-background shadow-amber-500/25'
-                    : 'bg-gold-primary hover:bg-gold-light text-background shadow-gold-primary/25'
-                }`}
-              >
-                <div className="w-8 h-8 rounded-full bg-background/10 flex items-center justify-center text-background group-hover:scale-110 transition">
-                  <VehicleIcon type={urbanServiceType} className="w-5 h-5 stroke-[2.5]" />
-                </div>
-                <span className="tracking-wide">
-                  {urbanServiceType === 'REMOLCADA' 
-                    ? 'PEDIR AUXILIO / REMOLCADA' 
-                    : urbanServiceType === 'MOTOCAR' 
-                    ? 'PEDIR MOTOCAR (CARGA)' 
-                    : urbanServiceType === 'TAXI_AUTO' 
-                    ? 'PEDIR TAXI AUTO' 
-                    : 'PEDIR MOTOTAXI'}
-                </span>
-              </button>
+              <SafetyBanner />
 
-              <div className="text-center">
+              {(urbanServiceType === 'MOTOTAXI' || urbanServiceType === 'REMOLCADA') && (
                 <button
-                  onClick={handleFetchLocation}
-                  className="text-xs font-semibold text-text-secondary hover:text-white transition inline-flex items-center gap-1.5"
+                  onClick={() => {
+                    haptics.selection();
+                    setUrbanServiceType(urbanServiceType === 'REMOLCADA' ? 'MOTOTAXI' : 'REMOLCADA');
+                  }}
+                  className="w-full min-h-11 text-sm font-semibold text-text-secondary flex items-center justify-center gap-2 active:text-white transition-colors"
                 >
-                  <Navigation className="w-3 h-3 text-gold-primary" />
-                  <span>Usar mi ubicación actual</span>
+                  <Wrench className="w-4 h-4 text-gold-primary" />
+                  <span>{urbanServiceType === 'REMOLCADA' ? 'Volver a pedir un viaje' : '¿Moto varada? Pedir auxilio'}</span>
                 </button>
+              )}
+            </BottomSheet>
+          )}
+
+          {/* STATE 2: CONFIRMING (destino elegido en el buscador) */}
+          {passengerState === 'CONFIRMING' && destination && (
+            <BottomSheet
+              key="confirming"
+              floating={gpsButton}
+              title={
+                <span className="flex items-center gap-3">
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-xs font-semibold text-text-secondary">Vas a</span>
+                    <span className="block font-display text-lg font-extrabold text-white leading-tight truncate">{destination.name}</span>
+                  </span>
+                  <span className="shrink-0 font-display text-lg font-extrabold text-gold-primary tabular-nums">Bs {currentOfferFare}</span>
+                </span>
+              }
+              footer={
+                <>
+                  <button
+                    onClick={handleConfirmBooking}
+                    className="w-full h-14 rounded-2xl bg-gold-primary text-background font-black text-base flex items-center justify-center gap-2.5 shadow-[0_10px_24px_-8px_rgba(255,198,26,0.55)] transition active:scale-[0.98]"
+                  >
+                    <Check className="w-5 h-5 stroke-[3]" />
+                    <span>Confirmar y pedir</span>
+                  </button>
+                  <button
+                    onClick={handleChangeDestination}
+                    className="w-full min-h-11 text-sm font-semibold text-text-secondary active:text-white transition-colors"
+                  >
+                    Cambiar destino
+                  </button>
+                </>
+              }
+            >
+              {destination.address && (
+                <p className="text-sm text-text-secondary flex items-center gap-2">
+                  <MapPin className="w-4 h-4 text-gold-primary shrink-0" />
+                  <span className="truncate">{destination.address}</span>
+                </p>
+              )}
+
+              <ServicePicker
+                value={urbanServiceType}
+                onChange={(s) => { setCustomOffer(null); setUrbanServiceType(s); }}
+                getFare={getBaseFare}
+              />
+
+              <div role="radiogroup" aria-label="Método de pago" className="grid grid-cols-2 gap-2 p-1 rounded-2xl bg-surface-2 border border-white/10">
+                {([['CASH', 'Efectivo'], ['QR', 'QR']] as const).map(([id, label]) => (
+                  <button
+                    key={id}
+                    role="radio"
+                    aria-checked={selectedPaymentMethod === id}
+                    onClick={() => { haptics.selection(); setSelectedPaymentMethod(id); }}
+                    className={`h-11 rounded-xl text-sm font-bold flex items-center justify-center gap-2 transition-colors ${
+                      selectedPaymentMethod === id ? 'bg-gold-primary text-background' : 'text-text-secondary'
+                    }`}
+                  >
+                    {id === 'QR' ? <QrCode className="w-4 h-4" /> : <DollarSign className="w-4 h-4" />}
+                    {label}
+                  </button>
+                ))}
               </div>
-            </motion.div>
+            </BottomSheet>
           )}
 
           {/* STATE 4: SEARCHING DRIVER (Radar Animation) */}

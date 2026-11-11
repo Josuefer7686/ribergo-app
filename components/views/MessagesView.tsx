@@ -6,7 +6,7 @@ import {
   Send, CheckCheck, MessageSquare, ChevronRight, ArrowLeft, Bike, Sparkles, 
   Wallet, CheckCircle2, ShieldCheck, Clock, AlertTriangle, MessageCircle, ExternalLink 
 } from 'lucide-react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion, AnimatePresence } from 'motion/react';
 import { haptics } from '@/utils/haptics';
 import { audio } from '@/utils/audio';
 import { apiService } from '@/services/apiService';

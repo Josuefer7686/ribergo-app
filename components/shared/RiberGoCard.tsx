@@ -1,7 +1,7 @@
 'use client';
 
 import { useAppStore } from '@/store/useAppStore';
-import { motion } from 'framer-motion';
+import { motion } from 'motion/react';
 import { QrCode, Wifi, ShieldCheck, Sparkles, PlusCircle } from 'lucide-react';
 import { haptics } from '@/utils/haptics';
 

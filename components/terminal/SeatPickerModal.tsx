@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { IosModal } from '@/components/shared/IosModal';
 import { TerminalDeparture } from '@/store/useAppStore';
-import { motion } from 'framer-motion';
+import { motion } from 'motion/react';
 import { CheckCircle2, User, Sparkles, Car } from 'lucide-react';
 import { haptics } from '@/utils/haptics';
 import { audio } from '@/utils/audio';

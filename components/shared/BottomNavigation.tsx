@@ -2,17 +2,17 @@
 
 import { useAppStore } from '@/store/useAppStore';
 import { haptics } from '@/utils/haptics';
-import { Home, Clock, MessageSquare, User, DollarSign } from 'lucide-react';
-import { motion } from 'framer-motion';
+import { Home, Clock, ClipboardList, MessageCircle, User, DollarSign } from 'lucide-react';
+import { motion } from 'motion/react';
 
 export function BottomNavigation() {
   const { role, activeTab, setActiveTab } = useAppStore();
 
   const passengerTabs = [
     { id: 'HOME', label: 'Inicio', icon: Home },
-    { id: 'TRIPS', label: 'Viajes', icon: Clock },
-    { id: 'MESSAGES', label: 'Mensajes', icon: MessageSquare },
-    { id: 'PROFILE', label: 'Perfil', icon: User },
+    { id: 'TRIPS', label: 'Mis viajes', icon: ClipboardList },
+    { id: 'MESSAGES', label: 'Mensajes', icon: MessageCircle },
+    { id: 'PROFILE', label: 'Mi cuenta', icon: User },
   ] as const;
 
   const driverTabs = [
@@ -25,7 +25,7 @@ export function BottomNavigation() {
   const tabs = role === 'PASSENGER' ? passengerTabs : driverTabs;
 
   return (
-    <div className="w-full relative shrink-0 bg-surface/75 border-t border-white/10 backdrop-blur-2xl pb-safe pt-2.5 px-4 flex items-center justify-around z-40 shadow-2xl">
+    <nav aria-label="Navegación principal" className="w-full relative shrink-0 bg-surface border-t border-white/10 pb-safe pt-2 px-2 flex items-center justify-around z-40">
       {tabs.map((tab) => {
         const Icon = tab.icon;
         const isActive = activeTab === tab.id;
@@ -37,24 +37,25 @@ export function BottomNavigation() {
               haptics.selection();
               setActiveTab(tab.id as any);
             }}
-            className="flex flex-col items-center gap-1 py-1 px-3 relative group transition active:scale-90"
+            aria-current={isActive ? 'page' : undefined}
+            className="flex flex-col items-center justify-center gap-1 min-h-14 min-w-16 px-3 relative group transition active:scale-90"
           >
             <Icon 
-              className={`w-5 h-5 transition-colors ${isActive ? 'text-gold-primary' : 'text-text-secondary group-hover:text-white'}`} 
+              className={`w-6 h-6 transition-colors ${isActive ? 'text-gold-primary' : 'text-text-secondary group-hover:text-white'}`} 
             />
-            <span className={`text-[10px] font-bold tracking-tight transition-colors ${isActive ? 'text-gold-primary' : 'text-text-secondary group-hover:text-white'}`}>
+            <span className={`text-xs font-semibold transition-colors ${isActive ? 'text-gold-primary' : 'text-text-secondary group-hover:text-white'}`}>
               {tab.label}
             </span>
             {isActive && (
               <motion.div 
                 layoutId="active-tab-glow"
                 transition={{ type: 'spring', stiffness: 350, damping: 25 }}
-                className="absolute -bottom-1.5 w-6 h-1 rounded-full bg-gold-primary shadow-sm shadow-gold-primary"
+                className="absolute top-0 w-8 h-0.5 rounded-full bg-gold-primary"
               />
             )}
           </button>
         );
       })}
-    </div>
+    </nav>
   );
 }

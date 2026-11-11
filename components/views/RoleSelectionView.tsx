@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { useAppStore } from '@/store/useAppStore';
 import { User, Bike, ChevronRight, Sparkles, Shield, AlertCircle, Check } from 'lucide-react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion, AnimatePresence } from 'motion/react';
 import { haptics } from '@/utils/haptics';
 import { audio } from '@/utils/audio';
 import { apiService } from '@/services/apiService';

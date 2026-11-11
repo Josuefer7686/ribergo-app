@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion, AnimatePresence } from 'motion/react';
 import { Smartphone, Download, Share2, PlusSquare, ArrowUpRight, CheckCircle2, X, Sparkles, ArrowDown, ShieldCheck } from 'lucide-react';
 import { haptics } from '@/utils/haptics';
 import { audio } from '@/utils/audio';
