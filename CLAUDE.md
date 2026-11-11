@@ -105,6 +105,14 @@
 - [`TerminalView.tsx`](components/terminal/TerminalView.tsx): Interfaz de la Terminal Interprovincial Riberalta ↔ Guayaramerín (Salidas, Expresos y Encomiendas).
 - [`SeatPickerModal.tsx`](components/terminal/SeatPickerModal.tsx): Selector interactivo de asientos en vagonetas Noah / Ipsum.
 
+### 3.6b. Panel de administración (`/admin`)
+Visor en vivo de Firestore en español, solo para el dueño. **Lee por el servidor** (Admin SDK) porque las reglas cierran la base a los clientes.
+- [`app/admin/`](app/admin): página y layout (noindex, pantalla completa). La app móvil vive en el grupo `app/(app)/`.
+- [`app/api/admin/login`](app/api/admin/login/route.ts): contraseña → cookie `rg_admin` httpOnly, firmada, 12 h; 5 intentos por IP cada 10 min. [`lib/adminAuth.ts`](lib/adminAuth.ts).
+- [`app/api/admin/stream`](app/api/admin/stream/route.ts): SSE en vivo por colección (`onSnapshot`, se reconecta cada 55 s); [`summary`](app/api/admin/summary/route.ts): conteos; [`names`](app/api/admin/names/route.ts): id → nombre (caché 5 min).
+- [`lib/adminCollections.ts`](lib/adminCollections.ts): catálogo y descripciones de cada colección. Para añadir una colección nueva: agregarla aquí y sus columnas en [`components/admin/columns.tsx`](components/admin/columns.tsx).
+- Solo lectura: el panel no escribe nada en la base de datos.
+
 ### 3.7. Directorio `components/map/`
 - [`MapComponent.tsx`](components/map/MapComponent.tsx): Componente Leaflet con marcadores personalizados (pasajero, conductores cercanos, rutas trazadas y radio de búsqueda).
 - [`MapView.tsx`](components/map/MapView.tsx): Envoltorio cliente con importación dinámica (`next/dynamic` con `ssr: false`) para evitar errores de compilación del objeto `window` en Next.js.
@@ -271,6 +279,7 @@ Colecciones de viajes interprovinciales y paquetería entre Riberalta y Guayaram
 | **Rama principal** | `main` |
 | **Telegram Bot Token** | `TELEGRAM_BOT_TOKEN` (solo en Vercel y `.env.local`; **nunca** en el código ni en este archivo) |
 | **Telegram Admin Chat ID** | `TELEGRAM_ADMIN_CHAT_ID` (variable de entorno; solo este usuario puede aprobar recargas) |
+| **Panel admin** | `ADMIN_PANEL_PASSWORD` (≥ 8 caracteres) y `ADMIN_SESSION_SECRET` (≥ 32; `openssl rand -hex 32`). Sin ellas `/admin` no deja entrar |
 | **Firebase Admin** | `FIREBASE_SERVICE_ACCOUNT_B64` (JSON de cuenta de servicio en base64; solo servidor) |
 | **Telegram Webhook Secret** | `TELEGRAM_WEBHOOK_SECRET` (cadena larga aleatoria; se registra con `secret_token` en `setWebhook`) |
 | **Webhook URL** | `https://ribergoo.vercel.app/api/wallet/telegram-webhook` |

@@ -1,0 +1,153 @@
+'use client';
+
+import { useEffect, useState, type ReactNode } from 'react';
+import { X } from 'lucide-react';
+import {
+  type AdminDoc, fmtDate, money, placeName, roleLabel, serviceLabel, toMs,
+} from './format';
+import { Chip, type Names, StatusChip } from './ui';
+
+const LABELS: Record<string, string> = {
+  name: 'Nombre', phone: 'Teléfono', email: 'Correo', role: 'Rol', avatar: 'Foto',
+  rating: 'Calificación', ratingsCount: 'Cantidad de calificaciones', ratingsSum: 'Suma de calificaciones',
+  trips: 'Viajes hechos', totalTrips: 'Viajes en total', walletBalance: 'Saldo de la billetera',
+  freeTripsRemaining: 'Viajes de regalo que le quedan', vehicleType: 'Tipo de vehículo',
+  motorcycle: 'Vehículo', plate: 'Placa', verified: 'Verificado', hasSelectedRole: 'Ya eligió su rol',
+  hasCompletedDriverTutorial: 'Terminó el tutorial', accountNumber: 'Número de cuenta',
+  createdAt: 'Creado', updatedAt: 'Actualizado', createdAtMs: 'Creado', completedAt: 'Terminó',
+  completedAtMs: 'Terminó', acceptedAt: 'Aceptado', acceptedAtMs: 'Aceptado', approvedAtMs: 'Aprobada',
+  rejectedAtMs: 'Rechazada', lastActive: 'Última señal', formattedDate: 'Fecha',
+  status: 'Estado', serviceType: 'Servicio', pickup: 'Origen', destination: 'Destino', price: 'Precio',
+  distanceKm: 'Distancia (km)', durationMin: 'Duración (min)', paymentMethod: 'Forma de pago',
+  paymentStatus: 'Estado del pago', passengerId: 'Pasajero (código)', passengerName: 'Pasajero',
+  passengerPhone: 'Teléfono del pasajero', driverId: 'Conductor (código)', driverName: 'Conductor',
+  driverPhone: 'Teléfono del conductor', driverRating: 'Calificación del conductor',
+  amount: 'Monto', currentBalance: 'Saldo al pedir', previousBalance: 'Saldo anterior', newBalance: 'Saldo nuevo',
+  vehicle: 'Vehículo', approvedBy: 'Aprobada por (Telegram)', rejectedBy: 'Rechazada por (Telegram)',
+  text: 'Mensaje', sender: 'Quién escribió', todayIncome: 'Ganó hoy', totalIncome: 'Ganó en total',
+  todayDate: 'Día del conteo', heading: 'Rumbo', speed: 'Velocidad', currentLocation: 'Ubicación',
+  route: 'Ruta', date: 'Fecha', time: 'Hora', vehicleModel: 'Modelo', pricePerSeat: 'Precio por asiento',
+  occupiedSeats: 'Asientos ocupados', seatNumber: 'Asiento', trackingCode: 'Código de rastreo',
+  senderId: 'Remitente (código)', senderName: 'Remitente', senderPhone: 'Teléfono del remitente',
+  recipientName: 'Destinatario', recipientPhone: 'Teléfono del destinatario',
+  packageDescription: 'Contenido', origin: 'Origen', deliveryAddress: 'Dirección de entrega',
+  pickupAddress: 'Recoger en', destinationAddress: 'Llevar a', departureDate: 'Día de salida',
+  departureTime: 'Hora de salida', chatId: 'Chat de Telegram', adminName: 'Administrador',
+};
+
+const MONEY_KEYS = new Set(['price', 'amount', 'walletBalance', 'currentBalance', 'previousBalance', 'newBalance', 'todayIncome', 'totalIncome', 'pricePerSeat']);
+const PERSON_KEYS = new Set(['passengerId', 'driverId', 'senderId']);
+
+function renderValue(key: string, v: any, names: Names): ReactNode {
+  if (v === null || v === undefined || v === '') return <span className="text-text-secondary">—</span>;
+  if (typeof v === 'boolean') return v ? 'Sí' : 'No';
+  if (key === 'status') return <StatusChip status={v} />;
+  if (key === 'role') return roleLabel(v);
+  if (key === 'serviceType' || key === 'vehicleType') return serviceLabel(v);
+  if (key === 'sender') return v === 'DRIVER' ? 'Conductor' : 'Pasajero';
+  if (MONEY_KEYS.has(key) && typeof v === 'number') return money(v);
+  if (PERSON_KEYS.has(key)) {
+    const n = names[String(v)]?.name;
+    return (
+      <span>
+        {n ? <span className="font-semibold">{n} </span> : null}
+        <span className="font-mono text-xs text-text-secondary">{String(v)}</span>
+      </span>
+    );
+  }
+  const ms = toMs(v);
+  if (ms && (typeof v === 'object' || key.endsWith('Ms') || key.endsWith('At'))) return fmtDate(ms, true);
+  if (v && typeof v === 'object' && '__geo' in v) return `${v.__geo[0].toFixed(5)}, ${v.__geo[1].toFixed(5)}`;
+  if (v && typeof v === 'object' && '__ref' in v) return <span className="font-mono text-xs">{v.__ref}</span>;
+  if (key === 'pickup' || key === 'destination') {
+    const lat = v?.lat, lng = v?.lng;
+    return (
+      <span>
+        {placeName(v)}
+        {typeof lat === 'number' && typeof lng === 'number' && (
+          <span className="block text-xs text-text-secondary font-mono">{lat.toFixed(5)}, {lng.toFixed(5)}</span>
+        )}
+      </span>
+    );
+  }
+  if (Array.isArray(v) && v.every((x) => typeof x !== 'object')) return v.length ? v.join(', ') : 'Ninguno';
+  if (typeof v === 'object') {
+    return <pre className="whitespace-pre-wrap break-words font-mono text-xs text-text-secondary">{JSON.stringify(v, null, 2)}</pre>;
+  }
+  return String(v);
+}
+
+interface Props {
+  doc: AdminDoc;
+  title: string;
+  names: Names;
+  onClose: () => void;
+}
+
+export function DocDetail({ doc, title, names, onClose }: Props) {
+  const [raw, setRaw] = useState(false);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  // Si existe la fecha en dos formatos (createdAt y createdAtMs), se muestra una sola vez.
+  const keys = Object.keys(doc.data).filter((k) => !(k.endsWith('Ms') && k.slice(0, -2) in doc.data)).sort((a, b) => {
+    const ia = a in LABELS ? 0 : 1, ib = b in LABELS ? 0 : 1;
+    return ia - ib || a.localeCompare(b);
+  });
+
+  return (
+    <div className="fixed inset-0 z-50 flex justify-end" role="dialog" aria-modal="true" aria-label={`Detalle: ${title}`}>
+      <button className="absolute inset-0 bg-black/60" aria-label="Cerrar detalle" onClick={onClose} />
+      <aside className="relative h-full w-full max-w-xl overflow-y-auto bg-surface border-l border-white/10 shadow-[-24px_0_48px_-12px_rgba(0,0,0,0.8)]">
+        <header className="sticky top-0 z-10 flex items-start justify-between gap-4 border-b border-white/10 bg-surface px-5 py-4">
+          <div className="min-w-0">
+            <h2 className="font-display text-lg font-extrabold leading-tight">{title}</h2>
+            <p className="mt-1 break-all font-mono text-xs text-text-secondary">{doc.path}</p>
+          </div>
+          <button onClick={onClose} aria-label="Cerrar" className="grid h-10 w-10 shrink-0 place-items-center rounded-xl border border-white/10 text-text-secondary hover:text-white">
+            <X className="h-5 w-5" />
+          </button>
+        </header>
+
+        <div className="px-5 py-4">
+          <div className="mb-4 flex items-center gap-2">
+            <button
+              onClick={() => setRaw(false)}
+              className={`h-9 rounded-lg px-3 text-sm font-semibold ${!raw ? 'bg-gold-primary text-background' : 'border border-white/10 text-text-secondary'}`}
+            >
+              Resumen
+            </button>
+            <button
+              onClick={() => setRaw(true)}
+              className={`h-9 rounded-lg px-3 text-sm font-semibold ${raw ? 'bg-gold-primary text-background' : 'border border-white/10 text-text-secondary'}`}
+            >
+              Datos técnicos
+            </button>
+          </div>
+
+          {raw ? (
+            <pre className="overflow-x-auto rounded-xl border border-white/10 bg-background p-4 font-mono text-xs leading-relaxed text-text-secondary">
+              {JSON.stringify(doc.data, null, 2)}
+            </pre>
+          ) : (
+            <dl className="divide-y divide-white/10">
+              {keys.map((k) => (
+                <div key={k} className="grid grid-cols-[10rem_1fr] gap-3 py-2.5 text-sm">
+                  <dt className="text-text-secondary">{LABELS[k] ?? <span className="font-mono text-xs">{k}</span>}</dt>
+                  <dd className="min-w-0 break-words">{renderValue(k, doc.data[k], names)}</dd>
+                </div>
+              ))}
+              {keys.length === 0 && <p className="py-3 text-sm text-text-secondary">Este documento está vacío.</p>}
+            </dl>
+          )}
+        </div>
+      </aside>
+    </div>
+  );
+}
+
+export { Chip };

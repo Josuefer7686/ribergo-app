@@ -67,9 +67,7 @@ export default function RootLayout({children}: {children: React.ReactNode}) {
         />
       </head>
       <body className={`font-sans antialiased bg-background text-white select-none overflow-hidden h-screen h-[100dvh]`} suppressHydrationWarning>
-        <div className="mx-auto w-full max-w-[430px] h-full h-[100dvh] relative overflow-hidden bg-background shadow-2xl sm:border-x sm:border-border-custom flex flex-col">
-          {children}
-        </div>
+        {children}
       </body>
     </html>
   );
