@@ -5,7 +5,7 @@ import { AnimatePresence, motion } from 'motion/react';
 import { Camera, Check, IdCard, Car, ScanFace, ShieldCheck, Clock, RefreshCw, AlertTriangle, UserRound } from 'lucide-react';
 import { compressToLimit, loadImage } from '@/lib/imageUtils';
 import {
-  FACE_MATCH_MAX_DISTANCE, descriptorFromImage, faceDistance, loadFaceApi, runLiveness,
+  FACE_MATCH_MAX_DISTANCE, descriptorFromImage, faceDistance, loadFaceApi, runLiveness, type LivenessUi,
 } from '@/lib/faceEngine';
 import {
   fetchVerification, submitVerification, verificationEnabled, type VerificationInfo,
@@ -231,7 +231,6 @@ function Wizard({ onSent }: { onSent: () => void }) {
             <FaceStep
               idDescriptor={idDescriptor}
               attempts={attempts}
-              face={face}
               onAttempt={() => setAttempts((a) => a + 1)}
               onDone={(r) => { setFace(r); setStep('REVIEW'); }}
               maxAttempts={MAX_FACE_ATTEMPTS}
@@ -337,22 +336,23 @@ function PhotoCapture({ label, image, busy, onFile, icon }: { label: string; ima
 }
 
 function FaceStep({
-  idDescriptor, attempts, maxAttempts, face, onAttempt, onDone,
+  idDescriptor, attempts, maxAttempts, onAttempt, onDone,
 }: {
   idDescriptor: Float32Array | null;
   attempts: number;
   maxAttempts: number;
-  face: unknown;
+  face?: unknown;
   onAttempt: () => void;
   onDone: (r: { facePhoto: string; liveFrame: string; distance: number; challenges: string[] }) => void;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const stopRef = useRef(false);
-  const [phase, setPhase] = useState<'idle' | 'loading' | 'running' | 'checking'>('idle');
-  const [prompt, setPrompt] = useState('');
-  const [progress, setProgress] = useState({ step: 0, total: 4 });
+  const [phase, setPhase] = useState<'idle' | 'loading' | 'camera' | 'running' | 'checking'>('idle');
+  const [ui, setUi] = useState<LivenessUi | null>(null);
   const [message, setMessage] = useState('');
+  const [shakeKey, setShakeKey] = useState(0);
+  const [loadingText, setLoadingText] = useState('');
 
   const stopCamera = useCallback(() => {
     stopRef.current = true;
@@ -360,39 +360,62 @@ function FaceStep({
     streamRef.current = null;
   }, []);
   useEffect(() => stopCamera, [stopCamera]);
-  void face;
+
+  const fail = (text: string) => {
+    stopCamera();
+    setMessage(text);
+    setUi(null);
+    setPhase('idle');
+    setShakeKey((k) => k + 1);
+    haptics.error();
+  };
 
   const start = async () => {
     setMessage('');
     stopRef.current = false;
     setPhase('loading');
+    setLoadingText('Preparando el reconocimiento facial (la primera vez tarda unos segundos)…');
     try {
       await loadFaceApi();
     } catch {
-      setMessage('No se pudo preparar el reconocimiento facial. Revisa tu internet e inténtalo otra vez.');
-      setPhase('idle');
-      return;
+      return fail('No se pudo preparar el reconocimiento facial. Revisa tu internet e inténtalo otra vez.');
     }
+    if (!navigator.mediaDevices?.getUserMedia) {
+      return fail('Este navegador no permite usar la cámara. Abre RiberGO en Chrome o Safari.');
+    }
+    setLoadingText('Abriendo la cámara…');
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } }, audio: false });
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } },
+        audio: false,
+      });
       streamRef.current = stream;
       const video = videoRef.current!;
       video.srcObject = stream;
       await video.play();
+      // espera a que el video tenga imagen real
+      const t0 = Date.now();
+      while (video.videoWidth === 0 && Date.now() - t0 < 5000) await new Promise((r) => setTimeout(r, 100));
     } catch {
-      setMessage('Necesitamos permiso para usar la cámara frontal. Actívalo en los ajustes del navegador.');
-      setPhase('idle');
-      return;
+      return fail('Necesitamos permiso para usar la cámara frontal. Actívalo en los ajustes del navegador y vuelve a intentar.');
     }
 
     setPhase('running');
-    const result = await runLiveness(videoRef.current!, (text, step, total) => { setPrompt(text); setProgress({ step, total }); }, () => stopRef.current);
-    if (!result.passed || !result.descriptor || !result.frame) {
-      stopCamera();
-      setMessage(result.reason || 'La prueba no se completó.');
-      setPhase('idle');
-      return;
+    let lastCompleted = 0;
+    let result;
+    try {
+      result = await runLiveness(
+        videoRef.current!,
+        (u) => {
+          if (u.completed > lastCompleted) { lastCompleted = u.completed; haptics.success(); }
+          setUi(u);
+        },
+        () => stopRef.current,
+      );
+    } catch {
+      return fail('Ocurrió un problema al analizar tu rostro. Inténtalo de nuevo.');
     }
+    if (!result.passed || !result.descriptor || !result.frame) return fail(result.reason || 'La prueba no se completó.');
 
     setPhase('checking');
     stopCamera();
@@ -400,9 +423,7 @@ function FaceStep({
     const matched = distance <= FACE_MATCH_MAX_DISTANCE;
     if (!matched && attempts + 1 < maxAttempts) {
       onAttempt();
-      setMessage(`Tu rostro no coincide con el carnet (intento ${attempts + 1} de ${maxAttempts}). Busca buena luz, sin gorra ni lentes oscuros, e inténtalo otra vez.`);
-      setPhase('idle');
-      return;
+      return fail(`Pasaste la prueba en vivo, pero tu rostro no coincide con el carnet (intento ${attempts + 1} de ${maxAttempts}). Busca buena luz, sin gorra ni lentes, y repítela. Si el carnet salió borroso, vuelve al paso del carnet.`);
     }
     if (!matched) onAttempt();
     const [facePhoto, liveFrame] = await Promise.all([
@@ -413,36 +434,100 @@ function FaceStep({
     onDone({ facePhoto, liveFrame, distance, challenges: result.challenges });
   };
 
+  const active = phase === 'running' || phase === 'checking';
+  const tone = phase === 'checking' ? 'good' : ui?.tone ?? 'bad';
+  const ring = tone === 'good' ? 'border-emerald-400 shadow-[0_0_32px_rgba(52,211,153,0.45)]' : tone === 'warn' ? 'border-amber-400' : 'border-rose-400';
+
   return (
     <>
-      <Title icon={<ScanFace className="w-7 h-7" />} title="Tu rostro en vivo" text="Es una prueba en vivo: una foto o un video en otra pantalla no funciona. Te pediremos parpadear y girar la cabeza." />
-      <div className="relative w-full aspect-[3/4] max-h-[52dvh] mx-auto rounded-[32px] overflow-hidden bg-surface border-2 border-gold-primary/40">
+      <Title icon={<ScanFace className="w-7 h-7" />} title="Tu rostro en vivo" text="Sigue las instrucciones en pantalla. Una foto o un video en otra pantalla no funciona." />
+
+      {phase === 'idle' && (
+        <ul className="rounded-2xl bg-surface border border-white/10 p-4 space-y-2 text-sm text-text-secondary">
+          <li className="flex gap-2"><Check className="w-4 h-4 text-gold-primary shrink-0 mt-0.5" />Ponte en un lugar con buena luz, de frente a la luz.</li>
+          <li className="flex gap-2"><Check className="w-4 h-4 text-gold-primary shrink-0 mt-0.5" />Sin gorra, sin lentes oscuros ni nada tapando tu cara.</li>
+          <li className="flex gap-2"><Check className="w-4 h-4 text-gold-primary shrink-0 mt-0.5" />Sostén el celular a la altura de tus ojos, con tu cara dentro del óvalo.</li>
+          <li className="flex gap-2"><Check className="w-4 h-4 text-gold-primary shrink-0 mt-0.5" />Te pediremos parpadear y girar la cabeza a un lado y al otro, despacio.</li>
+        </ul>
+      )}
+
+      <motion.div
+        key={shakeKey}
+        animate={shakeKey ? { x: [0, -10, 10, -8, 8, 0] } : {}}
+        transition={{ duration: 0.4 }}
+        className={`relative w-full aspect-[3/4] max-h-[50dvh] mx-auto rounded-[32px] overflow-hidden bg-surface border-4 transition-colors duration-300 ${active ? ring : 'border-white/10'} ${phase === 'idle' || phase === 'loading' ? 'hidden' : ''}`}
+      >
         <video ref={videoRef} playsInline muted className="absolute inset-0 w-full h-full object-cover -scale-x-100" />
-        {phase === 'idle' && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-gold-primary">
-            <UserRound className="w-16 h-16 opacity-70" />
-          </div>
-        )}
-        {(phase === 'running' || phase === 'checking') && (
+        {active && (
           <>
-            <div className="absolute inset-6 rounded-full border-2 border-dashed border-gold-primary/70 pointer-events-none" />
-            <div className="absolute inset-x-0 bottom-0 p-4 bg-gradient-to-t from-black/85 to-transparent text-center space-y-2">
-              <p className="font-display text-lg font-extrabold text-white" aria-live="assertive">{phase === 'checking' ? 'Comparando con tu carnet…' : prompt}</p>
-              <div className="flex gap-1.5 justify-center">
-                {Array.from({ length: progress.total }).map((_, i) => (
-                  <span key={i} className={`h-1.5 w-8 rounded-full ${i < progress.step ? 'bg-gold-primary' : 'bg-white/30'}`} />
-                ))}
-              </div>
+            <div className={`absolute left-[12%] right-[12%] top-[10%] bottom-[22%] rounded-[50%] border-[3px] transition-colors duration-300 pointer-events-none ${tone === 'good' ? 'border-emerald-400' : tone === 'warn' ? 'border-amber-400' : 'border-white/60 border-dashed'}`} />
+            <div className="absolute top-3 left-3 right-3 flex justify-center pointer-events-none">
+              <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold backdrop-blur ${ui?.faceVisible ? 'bg-emerald-500/80 text-black' : 'bg-rose-500/80 text-white'}`}>
+                <span className={`w-2 h-2 rounded-full ${ui?.faceVisible ? 'bg-black' : 'bg-white animate-pulse'}`} />
+                {ui?.faceVisible ? 'Rostro detectado' : 'Buscando tu rostro…'}
+              </span>
+            </div>
+            <div className="absolute inset-x-0 bottom-0 p-4 bg-gradient-to-t from-black/90 to-transparent text-center space-y-1">
+              <AnimatePresence mode="wait">
+                <motion.p
+                  key={phase === 'checking' ? 'check' : ui?.prompt}
+                  initial={{ opacity: 0, y: 8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0 }}
+                  transition={{ duration: 0.15 }}
+                  className="font-display text-xl font-extrabold text-white"
+                  aria-live="assertive"
+                >
+                  {phase === 'checking' ? 'Comparando con tu carnet…' : ui?.prompt}
+                </motion.p>
+              </AnimatePresence>
+              <p className="text-xs text-white/80">{phase === 'checking' ? 'Un momento' : ui?.hint}</p>
             </div>
           </>
         )}
-      </div>
-      {message && <p role="alert" className="text-sm text-rose-300 bg-rose-500/10 border border-rose-500/30 rounded-xl p-3">{message}</p>}
-      {(phase === 'idle' || phase === 'loading') && (
-        <button className={primaryBtn} onClick={start} disabled={phase === 'loading'}>
+      </motion.div>
+
+      {active && ui && (
+        <ol className="space-y-2" aria-label="Pasos de la prueba">
+          {ui.steps.map((st, i) => {
+            const done = i < ui.completed || phase === 'checking';
+            const current = i === ui.completed && phase === 'running';
+            return (
+              <li key={st.id + i} className={`flex items-center gap-3 rounded-xl px-3 py-2.5 border transition-colors ${done ? 'bg-emerald-500/10 border-emerald-500/40' : current ? 'bg-gold-primary/10 border-gold-primary/50' : 'bg-surface border-white/10'}`}>
+                <motion.span
+                  initial={false}
+                  animate={done ? { scale: [0.6, 1.25, 1] } : { scale: 1 }}
+                  className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-black shrink-0 ${done ? 'bg-emerald-400 text-black' : current ? 'bg-gold-primary text-background animate-pulse' : 'bg-white/10 text-text-secondary'}`}
+                >
+                  {done ? <Check className="w-4 h-4 stroke-[3]" /> : i + 1}
+                </motion.span>
+                <span className={`text-sm font-semibold ${done ? 'text-emerald-300' : current ? 'text-white' : 'text-text-secondary'}`}>{st.label}</span>
+              </li>
+            );
+          })}
+        </ol>
+      )}
+
+      {phase === 'loading' && (
+        <div className="rounded-2xl bg-surface border border-white/10 p-5 text-center space-y-3" aria-live="polite">
+          <RefreshCw className="w-7 h-7 text-gold-primary mx-auto animate-spin" />
+          <p className="text-sm text-text-secondary">{loadingText}</p>
+        </div>
+      )}
+
+      {message && (
+        <motion.p initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} role="alert" className="text-sm text-rose-200 bg-rose-500/10 border border-rose-500/40 rounded-xl p-3 flex gap-2">
+          <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-rose-300" />{message}
+        </motion.p>
+      )}
+      {phase === 'idle' && (
+        <button className={primaryBtn} onClick={start}>
           <ScanFace className="w-5 h-5" />
-          {phase === 'loading' ? 'Preparando…' : message ? 'Intentar de nuevo' : 'Empezar prueba de rostro'}
+          {message ? 'Intentar de nuevo' : 'Empezar prueba de rostro'}
         </button>
+      )}
+      {active && phase === 'running' && (
+        <button className="w-full min-h-11 text-sm font-semibold text-text-secondary" onClick={() => fail('Cancelaste la prueba.')}>Cancelar</button>
       )}
     </>
   );

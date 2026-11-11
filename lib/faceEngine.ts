@@ -64,13 +64,22 @@ export async function faceDistance(a: Float32Array, b: Float32Array): Promise<nu
   return faceapi.euclideanDistance(a, b);
 }
 
-export type Challenge = 'blink' | 'turnRight' | 'turnLeft';
+export type Challenge = 'blink' | 'turnA' | 'turnB';
 
-export const CHALLENGE_TEXT: Record<Challenge, string> = {
-  blink: 'Parpadea una vez',
-  turnRight: 'Gira la cabeza hacia tu derecha',
-  turnLeft: 'Gira la cabeza hacia tu izquierda',
-};
+export interface LivenessStep { id: 'front' | Challenge | 'photo'; label: string }
+
+/** Lo que la pantalla muestra en cada momento de la prueba. */
+export interface LivenessUi {
+  /** Instrucción grande */
+  prompt: string;
+  /** Detalle de lo que pasa (p. ej. "Acércate un poco") */
+  hint: string;
+  tone: 'bad' | 'warn' | 'good';
+  steps: LivenessStep[];
+  /** Cantidad de pasos ya cumplidos */
+  completed: number;
+  faceVisible: boolean;
+}
 
 export interface LivenessResult {
   passed: boolean;
@@ -82,103 +91,140 @@ export interface LivenessResult {
 
 const dist = (a: { x: number; y: number }, b: { x: number; y: number }) => Math.hypot(a.x - b.x, a.y - b.y);
 const eyeRatio = (p: { x: number; y: number }[]) => (dist(p[1], p[5]) + dist(p[2], p[4])) / (2 * dist(p[0], p[3]));
-
-const shuffle = <T,>(items: T[]): T[] => {
-  const a = [...items];
-  for (let i = a.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [a[i], a[j]] = [a[j], a[i]];
-  }
-  return a;
-};
-
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+/** El parpadeo puede ir en cualquier lugar; los dos giros siempre van seguidos (lado y luego el opuesto). */
+function buildSteps(): LivenessStep[] {
+  const blinkAt = Math.floor(Math.random() * 3); // antes, entre o después de los giros
+  const seq: LivenessStep['id'][] = ['turnA', 'turnB'];
+  seq.splice(blinkAt === 1 ? 1 : blinkAt === 0 ? 0 : 2, 0, 'blink');
+  const label: Record<string, string> = {
+    front: 'Mira de frente',
+    blink: 'Parpadea',
+    turnA: 'Gira la cabeza a un lado',
+    turnB: 'Ahora al lado contrario',
+    photo: 'Foto final',
+  };
+  return (['front', ...seq, 'photo'] as LivenessStep['id'][]).map((id) => ({ id, label: label[id] }));
+}
+
 /**
- * Ejecuta la prueba de vida sobre el video de la cámara frontal.
- * `onPrompt` recibe la instrucción actual para mostrarla en pantalla.
+ * Prueba de vida sobre el video de la cámara frontal. Es tolerante: se adapta a
+ * tu postura inicial (no hay que girar un ángulo exacto) y a ojos pequeños o lentes.
  */
 export async function runLiveness(
   video: HTMLVideoElement,
-  onPrompt: (text: string, step: number, total: number) => void,
+  onUi: (ui: LivenessUi) => void,
   shouldStop: () => boolean,
 ): Promise<LivenessResult> {
   const faceapi = await loadFaceApi();
-  const options = new faceapi.TinyFaceDetectorOptions({ inputSize: 320, scoreThreshold: 0.5 });
-  const challenges = shuffle<Challenge>(['blink', 'turnRight', 'turnLeft']);
-  const total = challenges.length + 1;
+  const options = new faceapi.TinyFaceDetectorOptions({ inputSize: 320, scoreThreshold: 0.4 });
+  const steps = buildSteps();
+  const challenges = steps.map((s) => s.id).filter((id): id is Challenge => id === 'blink' || id === 'turnA' || id === 'turnB');
+
+  let completed = 0;
+  const ui = (prompt: string, hint: string, tone: LivenessUi['tone'], faceVisible: boolean) =>
+    onUi({ prompt, hint, tone, steps, completed, faceVisible });
 
   const read = async () => {
     const r = await faceapi.detectSingleFace(video, options).withFaceLandmarks();
     if (!r) return null;
     const pts = r.landmarks.positions as { x: number; y: number }[];
-    const widthShare = r.detection.box.width / video.videoWidth;
-    const yaw = (pts[30].x - pts[0].x) / (pts[16].x - pts[0].x); // 0.5 = de frente
-    const ear = (eyeRatio(pts.slice(36, 42)) + eyeRatio(pts.slice(42, 48))) / 2;
-    return { yaw, ear, widthShare };
+    const box = r.detection.box;
+    return {
+      widthShare: box.width / video.videoWidth,
+      cx: (box.x + box.width / 2) / video.videoWidth,
+      yaw: (pts[30].x - pts[0].x) / (pts[16].x - pts[0].x), // 0.5 = de frente
+      ear: (eyeRatio(pts.slice(36, 42)) + eyeRatio(pts.slice(42, 48))) / 2,
+    };
   };
 
-  // 1) Rostro de frente, cerca y estable
+  // 1) Mira de frente, cerca, dentro del óvalo y quieto
+  ui('Pon tu cara dentro del óvalo', 'Buscando tu rostro…', 'bad', false);
   let stable = 0;
-  const startAt = Date.now();
-  while (stable < 5) {
+  let yawBase = 0.5;
+  let earBase = 0.3;
+  const earSamples: number[] = [];
+  const yawSamples: number[] = [];
+  const t0 = Date.now();
+  while (stable < 6) {
     if (shouldStop()) return { passed: false, reason: 'Cancelado', challenges };
-    if (Date.now() - startAt > 20000) return { passed: false, reason: 'No pudimos ver tu rostro. Busca más luz y acércate.', challenges };
+    if (Date.now() - t0 > 40000) return { passed: false, reason: 'No logramos ver tu rostro con claridad. Busca más luz, quítate gorra o lentes oscuros e inténtalo otra vez.', challenges };
     const f = await read();
-    if (!f) { onPrompt('No vemos tu rostro: mira a la cámara', 0, total); stable = 0; }
-    else if (f.widthShare < 0.28) { onPrompt('Acércate un poco más', 0, total); stable = 0; }
-    else if (f.yaw < 0.4 || f.yaw > 0.6) { onPrompt('Mira de frente a la cámara', 0, total); stable = 0; }
-    else { onPrompt('Perfecto, no te muevas', 0, total); stable++; }
-    await sleep(120);
+    if (!f) { stable = 0; ui('No vemos tu rostro', 'Mira a la cámara y busca más luz', 'bad', false); }
+    else if (f.widthShare < 0.2) { stable = 0; ui('Acércate un poco más', 'Tu cara se ve muy pequeña', 'warn', true); }
+    else if (f.widthShare > 0.75) { stable = 0; ui('Aléjate un poco', 'Tu cara se ve muy grande', 'warn', true); }
+    else if (f.yaw < 0.35 || f.yaw > 0.65) { stable = 0; ui('Mira de frente a la cámara', 'Tu cara está de lado', 'warn', true); }
+    else {
+      stable++;
+      earSamples.push(f.ear);
+      yawSamples.push(f.yaw);
+      ui('Perfecto, quédate quieto', 'Rostro detectado', 'good', true);
+    }
+    await sleep(60);
   }
+  yawBase = yawSamples.reduce((a, b) => a + b, 0) / yawSamples.length;
+  earBase = Math.max(...earSamples);
+  completed = 1;
 
-  // 2) Retos en orden aleatorio
-  for (let i = 0; i < challenges.length; i++) {
-    const challenge = challenges[i];
-    onPrompt(CHALLENGE_TEXT[challenge], i + 1, total);
+  // 2) Retos
+  let turnSign = 0;
+  for (const step of steps.slice(1, -1)) {
     const began = Date.now();
-    let done = false;
     let closed = false;
+    let done = false;
+    const prompt =
+      step.id === 'blink' ? 'Parpadea una vez' : step.id === 'turnA' ? 'Gira la cabeza a un lado' : 'Ahora gira hacia el lado contrario';
+    ui(prompt, 'Hazlo con calma', 'good', true);
     while (!done) {
       if (shouldStop()) return { passed: false, reason: 'Cancelado', challenges };
-      if (Date.now() - began > 12000) return { passed: false, reason: 'No detectamos el movimiento. Inténtalo de nuevo.', challenges };
+      if (Date.now() - began > 15000) {
+        return { passed: false, reason: 'No detectamos el movimiento. Hazlo un poco más marcado e inténtalo de nuevo.', challenges };
+      }
       const f = await read();
-      if (f) {
-        if (challenge === 'blink') {
-          if (f.ear < 0.2) closed = true;
-          else if (closed && f.ear > 0.26) done = true;
-        } else if (challenge === 'turnRight') {
-          done = f.yaw < 0.38; // en el espejo, tu derecha
-        } else {
-          done = f.yaw > 0.62;
+      if (!f) { ui(prompt, 'Perdimos tu rostro: vuelve al centro', 'warn', false); await sleep(60); continue; }
+      ui(prompt, 'Muy bien, sigue', 'good', true);
+      if (step.id === 'blink') {
+        if (f.ear < earBase * 0.78) closed = true;
+        else if (closed && f.ear > earBase * 0.9) done = true;
+      } else {
+        const delta = f.yaw - yawBase;
+        if (step.id === 'turnA') {
+          if (Math.abs(delta) >= 0.1) { turnSign = Math.sign(delta); done = true; }
+        } else if (Math.sign(delta) === -turnSign && Math.abs(delta) >= 0.1) {
+          done = true;
         }
       }
-      await sleep(90);
+      await sleep(50);
     }
-    await sleep(250);
+    completed++;
+    ui('¡Bien hecho!', 'Paso cumplido', 'good', true);
+    await sleep(450);
   }
 
-  // 3) Vuelve al frente y se toma la foto con su huella
-  onPrompt('Mira de frente: tomando tu foto', total, total);
+  // 3) Vuelve al centro y se toma la foto con su huella
+  ui('Mira de frente: tomando tu foto', 'No te muevas', 'good', true);
   const lastTry = Date.now();
-  while (Date.now() - lastTry < 10000) {
+  while (Date.now() - lastTry < 12000) {
     if (shouldStop()) return { passed: false, reason: 'Cancelado', challenges };
     const r = await faceapi
-      .detectSingleFace(video, new faceapi.TinyFaceDetectorOptions({ inputSize: 416, scoreThreshold: 0.5 }))
+      .detectSingleFace(video, new faceapi.TinyFaceDetectorOptions({ inputSize: 416, scoreThreshold: 0.4 }))
       .withFaceLandmarks()
       .withFaceDescriptor();
     if (r) {
       const pts = r.landmarks.positions as { x: number; y: number }[];
       const yaw = (pts[30].x - pts[0].x) / (pts[16].x - pts[0].x);
-      if (yaw > 0.42 && yaw < 0.58) {
+      if (Math.abs(yaw - yawBase) < 0.07) {
         const frame = document.createElement('canvas');
         frame.width = video.videoWidth;
         frame.height = video.videoHeight;
         frame.getContext('2d')!.drawImage(video, 0, 0);
+        completed++;
+        ui('¡Listo!', 'Rostro capturado', 'good', true);
         return { passed: true, descriptor: r.descriptor as Float32Array, frame, challenges };
       }
     }
-    await sleep(120);
+    await sleep(80);
   }
   return { passed: false, reason: 'No pudimos tomar tu foto de frente. Inténtalo de nuevo.', challenges };
 }
