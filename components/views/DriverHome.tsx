@@ -11,7 +11,7 @@ import { haptics } from '@/utils/haptics';
 import { audio } from '@/utils/audio';
 import { calculateBearing, calculateDistanceMeters } from '@/utils/geo';
 
-import { apiService, realtimeSyncBus } from '@/services/apiService';
+import { apiService, realtimeSyncBus, DRIVER_HEARTBEAT_MS } from '@/services/apiService';
 import { DriverWalletTutorialModal } from '@/components/modals/DriverWalletTutorialModal';
 import { QrTopupModal } from '@/components/modals/QrTopupModal';
 import { NegotiationChatModal } from '@/components/modals/NegotiationChatModal';
@@ -211,6 +211,22 @@ export const DriverHome = () => {
 
     return () => navigator.geolocation.clearWatch(watchId);
   }, [isOnline, driverId, setCurrentLocation]);
+
+  // Latido de presencia: mientras está en línea avisa cada 30 s que sigue conectado,
+  // aunque no se mueva. Sin latido, el servidor y el mapa lo dan por desconectado.
+  useEffect(() => {
+    if (!isOnline || !driverId) return;
+    const beat = () => {
+      if (!document.hidden) apiService.touchDriverPresence(driverId);
+    };
+    beat();
+    const t = setInterval(beat, DRIVER_HEARTBEAT_MS);
+    document.addEventListener('visibilitychange', beat);
+    return () => {
+      clearInterval(t);
+      document.removeEventListener('visibilitychange', beat);
+    };
+  }, [isOnline, driverId]);
 
   // Subscribe to active trip updates (e.g. negotiation, payment, fare updates, or cancellation)
   useEffect(() => {

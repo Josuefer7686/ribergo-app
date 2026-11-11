@@ -114,7 +114,11 @@ service cloud.firestore {
           || resource.data.get('driverId', '') == request.auth.uid
           || (resource.data.get('driverId', '') == '' && request.resource.data.get('driverId', '') == request.auth.uid)
         );
-      allow delete: if signedIn() && resource.data.passengerId == request.auth.uid;
+      // el pasajero o el conductor del viaje cierran la copia al terminar o cancelar
+      allow delete: if signedIn() && (
+        resource.data.passengerId == request.auth.uid
+        || resource.data.get('driverId', '') == request.auth.uid
+      );
     }
 
     // ───────── Historial de viajes completados ─────────

@@ -257,6 +257,15 @@ Colecciones de viajes interprovinciales y paquetería entre Riberalta y Guayaram
 
 ---
 
+## 4b. CICLO DE VIDA DE LOS DATOS (evita datos "activos" fantasma)
+
+- **Presencia de conductores:** `online_drivers/{id}.lastActive` se renueva con cada movimiento GPS y con un **latido cada 30 s** (`DriverHome` → `apiService.touchDriverPresence`). El mapa del pasajero **oculta** a quien lleve más de 2 min sin señal (`DRIVER_PRESENCE_TTL_MS`); el servidor borra a los de más de 5 min.
+- **Viajes:** al **cancelar**, el viaje queda como `CANCELLED` (con su chat) y se borra su copia de `active_requests`. Al **completar**, se actualiza `rides`, se escribe `trips_history` y se borra la copia de `active_requests`. Los pedidos activos sin movimiento por 3 h se marcan `CANCELLED` con `expired: true`.
+- **Limpieza automática:** [`lib/cleanup.ts`](lib/cleanup.ts) (`runCleanup`) corre a diario (cron) y a pedido con el botón **Limpiar datos viejos** del panel. Nunca borra usuarios, historial, mensajes ni dinero.
+- **Mantenimiento manual:** `node scripts/db-maintenance.mjs counts | backup | wipe --yes <colecciones> | reset-counters --yes`. `wipe` hace respaldo previo en `backups/` (ignorada por git) y nunca borra `users`.
+
+---
+
 ## 5. REGLAS DE NEGOCIO CRÍTICAS (NO MODIFICAR SIN PERMISO)
 
 1. **Inmutabilidad de Rol:** Un usuario registrado como pasajero **NO puede convertirse en conductor** con la misma cuenta. Si intenta trabajar, la app le indica que debe registrarse con otra cuenta de conductor independiente.
@@ -280,6 +289,7 @@ Colecciones de viajes interprovinciales y paquetería entre Riberalta y Guayaram
 | **Telegram Bot Token** | `TELEGRAM_BOT_TOKEN` (solo en Vercel y `.env.local`; **nunca** en el código ni en este archivo) |
 | **Telegram Admin Chat ID** | `TELEGRAM_ADMIN_CHAT_ID` (variable de entorno; solo este usuario puede aprobar recargas) |
 | **Panel admin** | `ADMIN_PANEL_PASSWORD` (≥ 8 caracteres) y `ADMIN_SESSION_SECRET` (≥ 32; `openssl rand -hex 32`). Sin ellas `/admin` no deja entrar |
+| **Limpieza diaria** | `CRON_SECRET` (16+ caracteres). Vercel Cron llama a `/api/cron/cleanup` cada día (ver `vercel.json`); sin el secreto responde 401 |
 | **Firebase Admin** | `FIREBASE_SERVICE_ACCOUNT_B64` (JSON de cuenta de servicio en base64; solo servidor) |
 | **Telegram Webhook Secret** | `TELEGRAM_WEBHOOK_SECRET` (cadena larga aleatoria; se registra con `secret_token` en `setWebhook`) |
 | **Webhook URL** | `https://ribergoo.vercel.app/api/wallet/telegram-webhook` |

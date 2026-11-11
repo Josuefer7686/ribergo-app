@@ -17,6 +17,11 @@ import {
  * Supports Phone SMS Auth (RecaptchaVerifier + signInWithPhoneNumber), Google Sign-In, and Cloud Firestore.
  */
 
+/** Un conductor sin señal por más de este tiempo se considera desconectado. */
+export const DRIVER_PRESENCE_TTL_MS = 2 * 60 * 1000;
+/** Cada cuánto un conductor en línea avisa que sigue ahí. */
+export const DRIVER_HEARTBEAT_MS = 30 * 1000;
+
 // Helper to format phone number to E.164 (+591XXXXXXXX for Bolivia if no country code provided)
 export const formatPhoneNumber = (phone: string): string => {
   let clean = phone.trim();
@@ -852,6 +857,19 @@ export const apiService = {
   },
 
   /**
+   * Latido: el conductor en línea avisa que sigue conectado aunque no se mueva.
+   * No recrea el documento si ya se desconectó.
+   */
+  async touchDriverPresence(driverId: string) {
+    if (!isFirebaseConfigured() || !driverId) return;
+    try {
+      await updateDoc(doc(db, 'online_drivers', driverId), { lastActive: serverTimestamp() });
+    } catch {
+      // el documento ya no existe: el conductor está desconectado
+    }
+  },
+
+  /**
    * Listen to real-time online drivers on the Riberalta map (Hybrid SyncBus + Firestore)
    */
   subscribeToOnlineDrivers(callback: (drivers: DriverData[]) => void) {
@@ -867,7 +885,15 @@ export const apiService = {
         unsubFirestore = onSnapshot(
           collection(db, 'online_drivers'),
           (snapshot) => {
-            const firestoreDrivers = snapshot.docs.map((docSnap) => {
+            const nowMs = Date.now();
+            const firestoreDrivers = snapshot.docs.filter((docSnap) => {
+              // Un conductor "conectado" sin señal reciente (app cerrada, sin internet,
+              // celular apagado) NO debe aparecerle al pasajero.
+              if (docSnap.metadata.hasPendingWrites) return true;
+              const last = docSnap.data().lastActive;
+              const lastMs = typeof last?.toMillis === 'function' ? last.toMillis() : 0;
+              return lastMs > 0 && nowMs - lastMs <= DRIVER_PRESENCE_TTL_MS;
+            }).map((docSnap) => {
               const data = docSnap.data();
               return {
                 id: docSnap.id,
@@ -983,10 +1009,14 @@ export const apiService = {
     // 2. Autodestruir físicamente el documento en Cloud Firestore
     if (isFirebaseConfigured()) {
       try {
-        const { deleteDoc, updateDoc } = await import('firebase/firestore');
-        // Notificar primero estado CANCELLED para que los observadores activos reaccionen de inmediato
-        await updateDoc(doc(db, 'rides', rideId), { status: 'CANCELLED' }).catch(() => {});
-        await deleteDoc(doc(db, 'rides', rideId)).catch(() => {});
+        const { deleteDoc } = await import('firebase/firestore');
+        // El viaje queda como CANCELLED (con su chat) para tener historial; solo se
+        // cierra la copia de "pedidos esperando conductor" para que no quede activa.
+        await updateDoc(doc(db, 'rides', rideId), {
+          status: 'CANCELLED',
+          cancelledAtMs: Date.now(),
+          updatedAt: serverTimestamp(),
+        }).catch(() => {});
         await deleteDoc(doc(db, 'active_requests', rideId)).catch(() => {});
       } catch (err) {
         console.warn('Firestore autodestroy error:', err);
@@ -1255,6 +1285,10 @@ export const apiService = {
           completedAt: serverTimestamp(),
           completedAtMs: Date.now(),
         }).catch(() => {});
+
+        // Cerrar la copia de "pedidos esperando conductor": el viaje ya terminó
+        const { deleteDoc } = await import('firebase/firestore');
+        await deleteDoc(doc(db, 'active_requests', rideId)).catch(() => {});
 
         // Respaldar en historial permanente inmutable de seguridad
         await setDoc(doc(db, 'trips_history', rideId), {

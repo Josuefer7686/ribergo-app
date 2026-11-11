@@ -21,6 +21,7 @@ beforeEach(async () => {
     await setDoc(doc(db, 'users/driver1'), { role: 'DRIVER', hasSelectedRole: true, walletBalance: 20, freeTripsRemaining: 3, rating: 5, ratingsCount: 1, trips: 1, verified: true });
     await setDoc(doc(db, 'users/pax1'), { role: 'PASSENGER', hasSelectedRole: false });
     await setDoc(doc(db, 'rides/r1'), { passengerId: 'pax1', status: 'SEARCHING_DRIVER', price: 10 });
+    await setDoc(doc(db, 'active_requests/r2'), { passengerId: 'pax1', driverId: 'driver1', status: 'TRIP_STARTED' });
     await setDoc(doc(db, 'rides/r2'), { passengerId: 'pax1', driverId: 'driver1', status: 'NEGOTIATING', price: 10 });
     await setDoc(doc(db, 'wallet_recharges/rec-1'), { driverId: 'driver1', amount: 20, status: 'PENDING' });
     await setDoc(doc(db, 'system_config/telegram_admin'), { chatId: '1' });
@@ -118,6 +119,11 @@ test('viajes: pasajero y conductor sí actualizan el suyo', async () => {
 test('viajes: solo el pasajero lo borra', async () => {
   await assertFails(deleteDoc(doc(as('driver1'), 'rides/r2')));
   await assertSucceeds(deleteDoc(doc(as('pax1'), 'rides/r2')));
+});
+
+test('active_requests: pasajero y conductor del viaje la cierran, un intruso no', async () => {
+  await assertFails(deleteDoc(doc(as('intruso'), 'active_requests/r2')));
+  await assertSucceeds(deleteDoc(doc(as('driver1'), 'active_requests/r2')));
 });
 
 test('chat: solo participantes', async () => {

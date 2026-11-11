@@ -1,7 +1,7 @@
 'use client';
 
 import type { ReactNode } from 'react';
-import { type AdminDoc, ACTIVE_RIDE_STATUSES, fmtAgo, fmtDate, money, placeName, recency, rideStatus, roleLabel, serviceLabel, toMs } from './format';
+import { type AdminDoc, ACTIVE_RIDE_STATUSES, isOnlineFresh, fmtAgo, fmtDate, money, placeName, recency, rideStatus, roleLabel, serviceLabel, toMs } from './format';
 import { type Names, Person, StatusChip } from './ui';
 import { useLiveCollection } from './useLiveCollection';
 
@@ -35,6 +35,8 @@ export function Overview({ names, onOpen, onUnauthorized }: { names: Names; onOp
   const users = useLiveCollection('users', onUnauthorized);
 
   const activeRides = rides.docs.filter((d) => ACTIVE_RIDE_STATUSES.includes(rideStatus(d))).sort((a, b) => recency(b) - recency(a));
+  const onlineNow = drivers.docs.filter(isOnlineFresh).length;
+  const ghostDrivers = drivers.docs.length - onlineNow;
   const abandoned = rides.docs.filter((d) => rideStatus(d) === 'STALE').length;
   const pending = recharges.docs.filter((d) => d.data.status === 'PENDING').sort((a, b) => recency(b) - recency(a));
   const nDrivers = users.docs.filter((d) => d.data.role === 'DRIVER').length;
@@ -53,7 +55,7 @@ export function Overview({ names, onOpen, onUnauthorized }: { names: Names; onOp
       </header>
 
       <ul className="mb-10 max-w-3xl border-t border-white/10">
-        <Row n={drivers.docs.length} title={drivers.docs.length === 1 ? 'conductor conectado' : 'conductores conectados'} hint="Aparecen en el mapa de los pasajeros." onOpen={() => onOpen('online_drivers')} />
+        <Row n={onlineNow} title={onlineNow === 1 ? 'conductor conectado' : 'conductores conectados'} hint={ghostDrivers > 0 ? `Con señal en los últimos 2 minutos. Hay ${ghostDrivers} más que quedaron "conectados" sin señal.` : 'Aparecen en el mapa de los pasajeros.'} onOpen={() => onOpen('online_drivers')} />
         <Row n={activeRides.length} title={activeRides.length === 1 ? 'viaje en curso' : 'viajes en curso'} hint={abandoned > 0 ? `Pedidos recientes que no terminan. Hay ${abandoned} más de días anteriores que quedaron sin cerrar.` : 'Pedidos que todavía no terminan ni se cancelan.'} onOpen={() => onOpen('rides')} />
         <Row n={pending.length} title={pending.length === 1 ? 'recarga pendiente' : 'recargas pendientes'} hint="Esperan que las apruebes en Telegram." onOpen={() => onOpen('wallet_recharges')} />
         <Row n={users.docs.length} title={users.docs.length === 1 ? 'usuario registrado' : 'usuarios registrados'} hint={`${nDrivers} conductores y ${nPassengers} pasajeros.`} onOpen={() => onOpen('users')} />

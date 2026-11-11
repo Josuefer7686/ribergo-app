@@ -124,3 +124,10 @@ export const pick = (d: AdminDoc, ...keys: string[]) => {
   }
   return undefined;
 };
+
+/** Un conductor sin señal por más de esto ya no está realmente conectado. */
+export const ONLINE_FRESH_MS = 2 * 60 * 1000;
+export const isOnlineFresh = (d: AdminDoc) => {
+  const ms = toMs(d.data.lastActive);
+  return Boolean(ms && Date.now() - ms <= ONLINE_FRESH_MS);
+};

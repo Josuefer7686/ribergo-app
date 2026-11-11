@@ -34,3 +34,6 @@ Thumbs.db
 # TypeScript build info
 *.tsbuildinfo
 .env*
+
+# Respaldos de la base de datos (contienen datos personales)
+backups/

@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { LayoutDashboard, LogOut } from 'lucide-react';
+import { Eraser, LayoutDashboard, LogOut } from 'lucide-react';
 import { ADMIN_COLLECTIONS, GROUP_LABELS, type CollectionGroupId, findCollection } from '@/lib/adminCollections';
 import { AdminLogin } from './AdminLogin';
 import { CollectionView } from './CollectionView';
@@ -78,6 +78,32 @@ export function AdminApp() {
     return () => { stop = true; clearInterval(t); document.removeEventListener('visibilitychange', load); };
   }, [session, loggedOut]);
 
+  const [cleanMsg, setCleanMsg] = useState<string | null>(null);
+  const [cleaning, setCleaning] = useState(false);
+  const [confirmClean, setConfirmClean] = useState(false);
+
+  const cleanup = async () => {
+    setCleaning(true);
+    setConfirmClean(false);
+    try {
+      const r = await fetch('/api/admin/cleanup', { method: 'POST' });
+      const j = await r.json();
+      if (r.status === 401) return loggedOut();
+      if (!j.ok) throw new Error(j.error || 'Error');
+      const { offlineDrivers: a, abandonedRides: b, closedRequests: c } = j.result;
+      setCleanMsg(
+        a + b + c === 0
+          ? 'Todo estaba en orden: no había nada que limpiar.'
+          : `Listo: ${a} conductor(es) desconectado(s), ${b} pedido(s) abandonado(s) cerrado(s) y ${c} copia(s) vieja(s) quitada(s).`
+      );
+    } catch {
+      setCleanMsg('No se pudo limpiar. Intenta de nuevo.');
+    } finally {
+      setCleaning(false);
+      setTimeout(() => setCleanMsg(null), 8000);
+    }
+  };
+
   const logout = async () => {
     await fetch('/api/admin/login', { method: 'DELETE' });
     setSession('out');
@@ -120,10 +146,40 @@ export function AdminApp() {
           <img src="/logo.png" alt="" className="h-9 w-9 rounded-lg" />
           <p className="font-display text-lg font-extrabold italic">RIBER <span className="text-gold-primary">GO</span> <span className="ml-1 hidden font-sans text-sm font-semibold not-italic text-text-secondary sm:inline">Panel de administración</span></p>
         </div>
-        <button onClick={logout} className="flex h-10 items-center gap-2 rounded-xl border border-white/10 px-3.5 text-sm font-semibold text-text-secondary hover:text-white">
-          <LogOut className="h-4 w-4" aria-hidden /> Salir
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setConfirmClean(true)}
+            disabled={cleaning}
+            className="flex h-10 items-center gap-2 rounded-xl border border-white/10 px-3.5 text-sm font-semibold text-text-secondary hover:text-white disabled:opacity-50"
+          >
+            <Eraser className="h-4 w-4" aria-hidden /> <span className="hidden sm:inline">{cleaning ? 'Limpiando…' : 'Limpiar datos viejos'}</span>
+          </button>
+          <button onClick={logout} className="flex h-10 items-center gap-2 rounded-xl border border-white/10 px-3.5 text-sm font-semibold text-text-secondary hover:text-white">
+            <LogOut className="h-4 w-4" aria-hidden /> Salir
+          </button>
+        </div>
       </header>
+
+      {confirmClean && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-black/60 px-5" role="dialog" aria-modal="true" aria-label="Limpiar datos viejos">
+          <div className="w-full max-w-md rounded-2xl border border-white/10 bg-surface p-6">
+            <h2 className="font-display text-lg font-extrabold">¿Limpiar datos viejos?</h2>
+            <p className="mt-2 text-[15px] leading-relaxed text-text-secondary">
+              Desconecta a los conductores que dejaron de dar señal, cancela los pedidos abandonados hace horas y quita las copias de viajes que ya terminaron.
+              <strong className="font-semibold text-white"> No borra usuarios, historial, mensajes ni dinero.</strong>
+            </p>
+            <div className="mt-5 flex justify-end gap-2">
+              <button onClick={() => setConfirmClean(false)} className="h-11 rounded-xl border border-white/10 px-4 text-sm font-semibold">Cancelar</button>
+              <button onClick={cleanup} className="h-11 rounded-xl bg-gold-primary px-4 text-sm font-black text-background">Limpiar ahora</button>
+            </div>
+          </div>
+        </div>
+      )}
+      {cleanMsg && (
+        <div role="status" className="fixed bottom-5 left-1/2 z-50 w-[calc(100%-2rem)] max-w-lg -translate-x-1/2 rounded-xl border border-white/10 bg-surface px-4 py-3 text-sm shadow-[0_12px_32px_-8px_rgba(0,0,0,0.8)]">
+          {cleanMsg}
+        </div>
+      )}
 
       {/* Navegación en teléfono: tira horizontal */}
       <nav aria-label="Secciones" className="no-scrollbar flex gap-2 overflow-x-auto border-b border-white/10 px-4 py-2.5 md:hidden">

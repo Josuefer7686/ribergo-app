@@ -2,7 +2,7 @@
 
 import type { ReactNode } from 'react';
 import {
-  type AdminDoc, fmtDate, money, pick, placeName, rideStatus, roleLabel, serviceLabel, stars, toMs,
+  type AdminDoc, fmtAgo, fmtDate, isOnlineFresh, money, pick, placeName, rideStatus, roleLabel, serviceLabel, stars, toMs,
 } from './format';
 import { Chip, type Names, Person, StatusChip } from './ui';
 
@@ -50,7 +50,15 @@ export const COLUMNS: Record<string, Col[]> = {
     { label: 'Vehículo', render: (d) => [serviceLabel(d.data.vehicleType), d.data.motorcycle].filter((x) => x && x !== '—').join(' · ') || '—' },
     { label: 'Placa', render: (d) => <span className="font-mono">{d.data.plate || '—'}</span> },
     { label: 'Calificación', render: (d) => stars(d.data.rating) },
-    { label: 'Última señal', render: when('lastActive') },
+    {
+      label: 'Última señal',
+      render: (d) => (
+        <span className="inline-flex items-center gap-2">
+          {fmtAgo(toMs(d.data.lastActive))}
+          {isOnlineFresh(d) ? <Chip tone="good">Conectado</Chip> : <Chip tone="neutral">Sin señal</Chip>}
+        </span>
+      ),
+    },
   ],
   driver_boxes: [
     { label: 'Conductor', render: (d, n) => <span className="font-semibold"><Person id={d.id} names={n} /></span> },
