@@ -78,6 +78,7 @@ export function useAutoLocation() {
   useEffect(() => {
     // If we don't have granted GPS permission or haven't acquired coordinates yet
     if (gpsPermission !== 'granted' || !currentLocation || currentLocation.name === 'Plaza Principal (Riberalta)') {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- pedir el GPS al montar es intencional
       requestLocation();
     }
   }, [gpsPermission, currentLocation, requestLocation]);

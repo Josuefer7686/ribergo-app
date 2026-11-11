@@ -41,7 +41,7 @@
 | **Hápticos** | Navigator Vibrate API | Patrones rítmicos estilo iOS (`[20, 40, 25, 45, 60]`) |
 | **PWA & Offline** | Service Worker nativo | `public/sw.js` (Versión `ribergo-v2.8`), caché Stale-While-Revalidate con bypass a `/api/*` |
 | **Hosting & Deploy** | Vercel Serverless | Dominio: `https://ribergoo.vercel.app` (Conectado a GitHub `origin/main`) |
-| **Bot Telegram** | Telegram Bot API | `@RiberGoBot` (`9299311110:AAGICHR74xGvZThQP-U2Mbf2Fr0VTB2WN2U`) |
+| **Bot Telegram** | Telegram Bot API | `@RiberGoBot` (token SOLO en variables de entorno, ver §6) |
 
 ---
 
@@ -58,7 +58,7 @@
 ### 3.2. Directorio `app/` (Next.js App Router)
 - [`app/page.tsx`](app/page.tsx): Punto de entrada principal. Controla el cambio de vistas de la máquina de estados: `SPLASH` -> `LOGIN` / `REGISTER` -> `ROLE_SELECTION` -> `MAIN_APP`. Registra el Service Worker y observa la sesión de Firebase Auth.
 - [`app/layout.tsx`](app/layout.tsx): Layout raíz. Configura metatags de PWA, viewport móvil (`width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover`), fuentes y tema oscuro.
-- [`app/globals.css`](app/globals.css): Definición de tokens de diseño, colores institucionales (Gold Primary `#F4C542`, Obsidian Background `#05080B`, Surface `#0F141A`, Surface-2 `#1A222D`), utilidades para iOS Safe Area (`pt-safe`, `pb-safe`) y scrollbars invisibles.
+- [`app/globals.css`](app/globals.css): Definición de tokens de diseño, colores institucionales (Gold Primary `#FFC61A`, Gold Light `#FFD84D`, Obsidian Background `#05080B`, Surface `#0B1116`, Surface-2 `#111920`), utilidades para iOS Safe Area (`pt-safe`, `pb-safe`) y scrollbars invisibles.
 - [`app/not-found.tsx`](app/not-found.tsx): Página 404 personalizada con redirección a inicio.
 - [`app/api/wallet/request-topup/route.ts`](app/api/wallet/request-topup/route.ts): **Ruta Serverless POST.** Recibe el FormData del comprobante de pago subido por el chofer, guarda la solicitud en Firestore (`wallet_recharges`), y envía inmediatamente la fotografía a Telegram con el caption formateado y los botones de aprobación rápida inline.
 - [`app/api/wallet/telegram-webhook/route.ts`](app/api/wallet/telegram-webhook/route.ts): **Ruta Serverless POST.** Webhook oficial de Telegram. Procesa comandos de texto (`/start`) y clics en botones inline (`approve:rec-xxx`, `reject:rec-xxx`). Acredita atómicamente el saldo en `users/{driverId}.walletBalance`, actualiza Firestore y edita el mensaje en Telegram.
@@ -85,7 +85,7 @@
 - [`SmartPwaInstallModal.tsx`](components/modals/SmartPwaInstallModal.tsx): Modal inteligente que detecta si el usuario está en Android (evento `beforeinstallprompt`) o iOS Safari (guía paso a paso "Compartir -> Agregar al inicio").
 
 ### 3.5. Directorio `components/shared/` (Componentes Reutilizables)
-- [`BottomNavigation.tsx`](components/shared/BottomNavigation.tsx): Barra de navegación inferior móvil con pestañas dinámicas según el rol (Inicio, Viajes, Mensajes, Ganancias/Billetera, Perfil), con retroalimentación háptica.
+- [`BottomNavigation.tsx`](components/shared/BottomNavigation.tsx): Barra de navegación inferior móvil con pestañas dinámicas según el rol (pasajero: Inicio, Mis viajes, Mensajes, Mi cuenta; conductor: Inicio, Viajes, Ingresos, Perfil), con retroalimentación háptica.
 - [`IosDynamicIslandNotification.tsx`](components/shared/IosDynamicIslandNotification.tsx): Banner flotante superior estilo Dynamic Island de iOS 18 para notificaciones de recarga de saldo aprobadas/rechazadas, deslizable para descartar con auto-cierre.
 - [`IosMessageToast.tsx`](components/shared/IosMessageToast.tsx): Notificación flotante superior para nuevos mensajes de chat durante un viaje cuando el usuario no está en la pestaña de mensajes.
 - [`IosModal.tsx`](components/shared/IosModal.tsx): Envoltorio base para modales con fondo difuminado, tirador superior para arrastrar y animaciones suaves de entrada/salida.
@@ -98,8 +98,8 @@
 - [`IosMapLoader.tsx`](components/shared/IosMapLoader.tsx): Placeholder de carga elegante para cuando el mapa de Leaflet se está montando en el navegador.
 
 ### 3.6. Directorio `components/passenger/` y `components/terminal/`
-- [`BottomSheet.tsx`](components/passenger/BottomSheet.tsx): Panel inferior arrastrable estilo iOS para la solicitud del viaje.
-- [`DestinationSearch.tsx`](components/passenger/DestinationSearch.tsx): Buscador predictivo de lugares populares de Riberalta (Plaza Principal, Mercado Central, Aeropuerto, etc.).
+- [`BottomSheet.tsx`](components/passenger/BottomSheet.tsx): Panel inferior arrastrable (solo el asa arrastra; se esconde dejando el título y vibra en oleada). Contenido con scroll propio y botón principal fijo al pie.
+- [`DestinationSearch.tsx`](components/passenger/DestinationSearch.tsx): Buscador con autocompletado sobre `RIBERALTA_DESTINATIONS` (45 lugares con coordenadas de OpenStreetMap y alias). Elegir un lugar muestra el botón **Ir**, que abre el panel de confirmación (`CONFIRMING`).
 - [`ServicePicker.tsx`](components/passenger/ServicePicker.tsx): Selector de tipos de vehículos urbanos con iconos oficiales nativos.
 - [`SafetyBanner.tsx`](components/passenger/SafetyBanner.tsx): Consejos de seguridad y verificación de placa del conductor.
 - [`TerminalView.tsx`](components/terminal/TerminalView.tsx): Interfaz de la Terminal Interprovincial Riberalta ↔ Guayaramerín (Salidas, Expresos y Encomiendas).
@@ -269,8 +269,9 @@ Colecciones de viajes interprovinciales y paquetería entre Riberalta y Guayaram
 | **Dominio de Producción** | `https://ribergoo.vercel.app` (¡Ojo con las dos 'o's!) |
 | **Repositorio GitHub** | `https://github.com/Josuefer7686/ribergo-app.git` |
 | **Rama principal** | `main` |
-| **Telegram Bot Token** | `9299311110:AAGICHR74xGvZThQP-U2Mbf2Fr0VTB2WN2U` |
-| **Telegram Admin Chat ID** | `6344399294` (Josué Fernando Maita Arteaga) |
+| **Telegram Bot Token** | `TELEGRAM_BOT_TOKEN` (solo en Vercel y `.env.local`; **nunca** en el código ni en este archivo) |
+| **Telegram Admin Chat ID** | `TELEGRAM_ADMIN_CHAT_ID` (variable de entorno; solo este usuario puede aprobar recargas) |
+| **Telegram Webhook Secret** | `TELEGRAM_WEBHOOK_SECRET` (cadena larga aleatoria; se registra con `secret_token` en `setWebhook`) |
 | **Webhook URL** | `https://ribergoo.vercel.app/api/wallet/telegram-webhook` |
 | **Firebase Project ID** | `ribergo-app` |
 | **Firebase Auth Domain** | `ribergo-app.firebaseapp.com` |
@@ -312,10 +313,24 @@ git push origin main
 ```
 
 ### Consultar o Reconfigurar el Webhook de Telegram
+Las variables `TELEGRAM_BOT_TOKEN` y `TELEGRAM_WEBHOOK_SECRET` deben estar exportadas en tu terminal (nunca pegues el token en archivos versionados):
 ```bash
 # Ver estado del Webhook
-curl -s "https://api.telegram.org/bot9299311110:AAGICHR74xGvZThQP-U2Mbf2Fr0VTB2WN2U/getWebhookInfo"
+curl -s "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/getWebhookInfo"
 
-# Registrar o reasignar Webhook a Vercel
-curl -s "https://api.telegram.org/bot9299311110:AAGICHR74xGvZThQP-U2Mbf2Fr0VTB2WN2U/setWebhook?url=https://ribergoo.vercel.app/api/wallet/telegram-webhook"
+# Registrar el Webhook con secret_token (Telegram lo enviará en la cabecera X-Telegram-Bot-Api-Secret-Token)
+curl -s "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/setWebhook" \
+  -d "url=https://ribergoo.vercel.app/api/wallet/telegram-webhook" \
+  -d "secret_token=$TELEGRAM_WEBHOOK_SECRET"
 ```
+
+---
+
+## 8. SEGURIDAD Y DINERO (LEER ANTES DE TOCAR LA BILLETERA)
+
+- **El saldo lo acredita solo el servidor.** El webhook aprueba/rechaza en una transacción de Firestore (PENDING → APPROVED/REJECTED una sola vez) y suma con `increment()`. El cliente **nunca** escribe un saldo de recarga: lo lee con `apiService.fetchWalletBalance()`.
+- **El webhook exige** la cabecera `X-Telegram-Bot-Api-Secret-Token` y que quien pulse el botón sea `TELEGRAM_ADMIN_CHAT_ID`. Monto y conductor salen del documento `wallet_recharges`, jamás del texto del mensaje.
+- **`/api/wallet/request-topup`** valida montos permitidos (10/20/50/100 BOB), tamaño e imagen, y lee el saldo del servidor.
+- **Comisiones** (`deductTripCommission`, `decrementDriverFreeTrips`) usan transacciones sobre el saldo real.
+- **PENDIENTE (alto riesgo):** `firestore.rules` sigue abierto (`allow read, write: if true`). Cerrarlo exige mover las escrituras de dinero a un servidor con `firebase-admin` y usar Firebase Auth en las reglas. Mientras tanto, cualquiera con el ID de proyecto puede editar saldos directamente.
+- Nunca subas tokens, claves ni `.env*` al repositorio. Si se filtra un token, revócalo en @BotFather (`/revoke`).

@@ -7,7 +7,7 @@ import {
   QrCode, CheckCircle2, ShieldCheck, Download, Check, Sparkles, 
   RefreshCw, Upload, Image as ImageIcon, X, Clock, AlertCircle, MessageCircle 
 } from 'lucide-react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion, AnimatePresence } from 'motion/react';
 import { haptics } from '@/utils/haptics';
 import { audio } from '@/utils/audio';
 import { notifications } from '@/utils/notifications';
@@ -50,14 +50,14 @@ export const QrTopupModal = ({ isOpen, onClose, onSuccess }: QrTopupModalProps) 
         audio.passengerTripFinished();
         setRechargeStatus('APPROVED');
 
-        const newBalance = currentBalance + selectedAmount;
+        // El servidor ya acreditó el saldo al aprobar: se lee de Firestore (fuente única).
         if (user) {
-          loginUser({
-            ...user,
-            walletBalance: newBalance,
+          apiService.fetchWalletBalance(user.id).then((serverBalance) => {
+            loginUser({
+              ...user,
+              walletBalance: serverBalance ?? currentBalance + selectedAmount,
+            });
           });
-        } else {
-          topUpWallet(selectedAmount);
         }
 
         if (onSuccess) {
@@ -79,7 +79,7 @@ export const QrTopupModal = ({ isOpen, onClose, onSuccess }: QrTopupModalProps) 
     });
 
     return () => unsubscribe();
-  }, [activeRechargeId, rechargeStatus, currentBalance, selectedAmount, user, loginUser, topUpWallet, onSuccess, onClose]);
+  }, [activeRechargeId, rechargeStatus, currentBalance, selectedAmount, user, loginUser, onSuccess, onClose]);
 
   // Download QR image to gallery
   const handleDownloadQr = async () => {

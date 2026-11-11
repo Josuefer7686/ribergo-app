@@ -29,10 +29,13 @@ export default function App() {
       // When the new Service Worker activates and claims control, reload to show new logo & code
       let refreshing = false;
       navigator.serviceWorker.addEventListener('controllerchange', () => {
-        if (!refreshing) {
-          refreshing = true;
-          window.location.reload();
-        }
+        if (refreshing) return;
+        // Nunca recargar en medio de un viaje: se aplica al terminar o al abrir la app de nuevo.
+        const { activeTrip, passengerState, driverState } = useAppStore.getState();
+        const inTrip = Boolean(activeTrip) || (passengerState !== 'IDLE' && passengerState !== 'LOCATION_READY' && passengerState !== 'LOCATION_LOADING') || !['OFFLINE', 'ONLINE', 'TRIP_COMPLETED'].includes(driverState);
+        if (inTrip) return;
+        refreshing = true;
+        window.location.reload();
       });
     }
   }, []);

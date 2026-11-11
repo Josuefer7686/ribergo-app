@@ -6,7 +6,7 @@ import { MapView } from '@/components/map/MapView';
 import { 
   Power, Navigation, MapPin, MessageSquare, Check, X, Clock, DollarSign, User, Bike, ChevronRight, AlertCircle, QrCode, Sparkles, Wrench, AlertTriangle 
 } from 'lucide-react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion, AnimatePresence } from 'motion/react';
 import { haptics } from '@/utils/haptics';
 import { audio } from '@/utils/audio';
 import { calculateBearing, calculateDistanceMeters } from '@/utils/geo';
@@ -103,12 +103,9 @@ export const DriverHome = () => {
     }
   };
 
-  const handleTopupSuccess = async (amount: number) => {
-    topUpWallet(amount);
+  // El saldo ya fue acreditado por el servidor al aprobar la recarga; aquí solo se limpia el aviso.
+  const handleTopupSuccess = () => {
     setLowBalanceBanner(false);
-    if (user?.id) {
-      await apiService.topUpDriverWallet(user.id, amount, walletBalance);
-    }
   };
 
   const getAccurateLocation = (): Promise<LocationPoint> => {

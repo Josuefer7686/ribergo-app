@@ -1,177 +1,165 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/firebase';
-import { doc, getDoc, setDoc, updateDoc, increment, serverTimestamp } from 'firebase/firestore';
+import { doc, runTransaction, increment, serverTimestamp } from 'firebase/firestore';
+import {
+  TELEGRAM_TOKEN,
+  TELEGRAM_ADMIN_CHAT_ID,
+  TELEGRAM_WEBHOOK_SECRET,
+  telegramApi,
+  safeEqual,
+} from '@/lib/telegram';
 
-const TELEGRAM_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '9299311110:AAGICHR74xGvZThQP-U2Mbf2Fr0VTB2WN2U';
-
+/**
+ * Webhook de Telegram. Seguridad:
+ *  1. Exige el secret_token configurado con setWebhook (cabecera
+ *     X-Telegram-Bot-Api-Secret-Token); sin él, nadie más puede invocarlo.
+ *  2. Solo el administrador (TELEGRAM_ADMIN_CHAT_ID) puede aprobar o rechazar.
+ *  3. El monto y el conductor salen SIEMPRE del documento en Firestore,
+ *     nunca del texto del mensaje.
+ *  4. Aprobar/rechazar es una transacción: solo pasa de PENDING a su estado
+ *     final una vez, y el saldo se acredita en el mismo paso.
+ */
 export async function POST(req: NextRequest) {
+  if (!TELEGRAM_TOKEN || !TELEGRAM_WEBHOOK_SECRET) {
+    console.error('Webhook de Telegram sin configurar: falta TELEGRAM_BOT_TOKEN o TELEGRAM_WEBHOOK_SECRET');
+    return NextResponse.json({ ok: false, error: 'not_configured' }, { status: 503 });
+  }
+
+  const received = req.headers.get('x-telegram-bot-api-secret-token') || '';
+  if (!safeEqual(received, TELEGRAM_WEBHOOK_SECRET)) {
+    return NextResponse.json({ ok: false }, { status: 401 });
+  }
+
   try {
     const update = await req.json();
 
-    // 1. Manejo de mensajes de texto (ej. /start para registrar el Chat ID del Administrador)
+    // 1. Mensajes de texto (/start)
     if (update.message) {
       const chatId = update.message.chat.id;
-      const text = (update.message.text || '').trim();
+      const senderId = String(update.message.from?.id ?? '');
       const senderName = update.message.from?.first_name || 'Administrador';
+      const isAdmin = Boolean(TELEGRAM_ADMIN_CHAT_ID) && senderId === TELEGRAM_ADMIN_CHAT_ID;
 
-      // Guardar el Chat ID en Firestore si es posible (resiliente a permisos)
-      try {
-        await setDoc(
-          doc(db, 'system_config', 'telegram_admin'),
-          {
-            chatId: String(chatId),
-            adminName: senderName,
-            updatedAt: serverTimestamp(),
-            updatedAtMs: Date.now(),
-          },
-          { merge: true }
-        );
-      } catch (fsErr) {
-        console.warn('Advertencia guardando telegram_admin en Firestore:', fsErr);
+      let text: string;
+      if (isAdmin) {
+        text = `👋 ¡Hola ${senderName}! Estás vinculado como administrador de RiberGO.\n\nCada comprobante de recarga por QR llegará aquí para que lo apruebes o rechaces con un toque.`;
+      } else if (!TELEGRAM_ADMIN_CHAT_ID) {
+        text = `Este bot aún no tiene administrador configurado.\n\nTu Chat ID es ${senderId}. Si eres el administrador, guárdalo en la variable TELEGRAM_ADMIN_CHAT_ID del servidor.`;
+      } else {
+        text = 'Este bot es solo para la administración de RiberGO.';
       }
 
-      // Responder con mensaje de confirmación
-      await fetch(`https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`, {
+      await fetch(telegramApi('sendMessage'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          chat_id: chatId,
-          text: `👋 ¡Hola ${senderName}!\n\n✅ Tu cuenta de administrador ha sido vinculada exitosamente con *RiberGO*.\n\n📱 *Chat ID:* \`${chatId}\`\n\nA partir de este momento, cada vez que un conductor suba un comprobante de recarga por QR (Yasta / Al Toque), recibirás aquí la foto y podrás *Aprobar* o *Rechazar* con 1 solo toque.`,
-          parse_mode: 'Markdown',
-        }),
+        body: JSON.stringify({ chat_id: chatId, text }),
       });
-
       return NextResponse.json({ ok: true });
     }
 
-    // 2. Manejo de botones de acción rápida [ ✅ Aprobar ] o [ ❌ Rechazar ]
+    // 2. Botones [ Aprobar ] / [ Rechazar ]
     if (update.callback_query) {
-      const callbackQuery = update.callback_query;
-      const callbackId = callbackQuery.id;
-      const data = callbackQuery.data || '';
-      const message = callbackQuery.message;
+      const cq = update.callback_query;
+      const callbackId: string = cq.id;
+      const fromId = String(cq.from?.id ?? '');
+      const message = cq.message;
       const chatId = message?.chat?.id;
       const messageId = message?.message_id;
 
-      const [action, rechargeId] = data.split(':');
+      if (!TELEGRAM_ADMIN_CHAT_ID || fromId !== TELEGRAM_ADMIN_CHAT_ID) {
+        await answerCallback(callbackId, '⛔ No autorizado.');
+        return NextResponse.json({ ok: true });
+      }
 
-      if (!rechargeId || (action !== 'approve' && action !== 'reject')) {
+      const [action, rechargeId] = String(cq.data || '').split(':');
+      if (!rechargeId || !/^rec-[A-Za-z0-9-]+$/.test(rechargeId) || (action !== 'approve' && action !== 'reject')) {
         await answerCallback(callbackId, 'Acción inválida');
         return NextResponse.json({ ok: true });
       }
 
-      let recharge: any = null;
       const rechargeRef = doc(db, 'wallet_recharges', rechargeId);
+      const approving = action === 'approve';
+      let amount = 0;
+
       try {
-        const rechargeSnap = await getDoc(rechargeRef);
-        if (rechargeSnap.exists()) {
-          recharge = rechargeSnap.data();
-        }
-      } catch (err) {
-        console.warn('Advertencia leyendo recharge de Firestore:', err);
-      }
+        await runTransaction(db, async (tx) => {
+          const snap = await tx.get(rechargeRef);
+          if (!snap.exists()) throw new Error('NOT_FOUND');
+          const recharge = snap.data();
+          if (recharge.status !== 'PENDING') throw new Error(`ALREADY:${recharge.status}`);
 
-      if (recharge && recharge.status === 'APPROVED') {
-        await answerCallback(callbackId, '⚠️ Esta recarga ya fue aprobada previamente.');
-        return NextResponse.json({ ok: true });
-      }
-
-      if (recharge && recharge.status === 'REJECTED') {
-        await answerCallback(callbackId, '⚠️ Esta recarga ya fue rechazada previamente.');
-        return NextResponse.json({ ok: true });
-      }
-
-      const timeStr = new Date().toLocaleTimeString('es-BO', { hour: '2-digit', minute: '2-digit' });
-
-      // Obtener amount y driverId ya sea de Firestore o de los datos del mensaje
-      let amount = recharge ? (Number(recharge.amount) || 0) : 0;
-      let driverId = recharge ? recharge.driverId : '';
-
-      if ((!amount || !driverId) && message?.caption) {
-        const idMatch = message.caption.match(/ID Conductor:\* `([^`]+)`/);
-        if (idMatch) driverId = idMatch[1];
-        const amountMatch = message.caption.match(/Monto Solicitado:\* \*([0-9.]+)\s*BOB\*/);
-        if (amountMatch) amount = Number(amountMatch[1]) || 0;
-      }
-
-      if (action === 'approve') {
-        // 1. Marcar recarga como aprobada en Firestore
-        try {
-          await updateDoc(rechargeRef, {
-            status: 'APPROVED',
-            approvedAtMs: Date.now(),
-            approvedAt: serverTimestamp(),
-          });
-        } catch (fsErr) {
-          console.warn('No se pudo actualizar estado de wallet_recharge en Firestore:', fsErr);
-        }
-
-        // 2. Incrementar saldo atómicamente en el documento del conductor
-        if (driverId && amount > 0) {
-          try {
-            const userDocRef = doc(db, 'users', driverId);
-            await updateDoc(userDocRef, {
-              walletBalance: increment(amount),
-            }).catch(async () => {
-              await setDoc(userDocRef, { walletBalance: amount }, { merge: true });
-            });
-          } catch (userErr) {
-            console.warn('No se pudo actualizar saldo en users Firestore:', userErr);
+          amount = Number(recharge.amount);
+          const driverId = String(recharge.driverId || '');
+          if (approving && (!Number.isFinite(amount) || amount <= 0 || amount > 1000 || !driverId)) {
+            throw new Error('INVALID_RECHARGE');
           }
+
+          if (approving) {
+            tx.update(rechargeRef, {
+              status: 'APPROVED',
+              approvedAtMs: Date.now(),
+              approvedAt: serverTimestamp(),
+              approvedBy: fromId,
+            });
+            tx.set(
+              doc(db, 'users', driverId),
+              { walletBalance: increment(amount), updatedAt: serverTimestamp() },
+              { merge: true }
+            );
+          } else {
+            tx.update(rechargeRef, {
+              status: 'REJECTED',
+              rejectedAtMs: Date.now(),
+              rejectedAt: serverTimestamp(),
+              rejectedBy: fromId,
+            });
+          }
+        });
+      } catch (err: any) {
+        const msg = String(err?.message || '');
+        if (msg === 'NOT_FOUND') {
+          await answerCallback(callbackId, '⚠️ No encontré esa recarga en la base de datos.');
+        } else if (msg.startsWith('ALREADY:')) {
+          const was = msg.split(':')[1] === 'APPROVED' ? 'aprobada' : 'rechazada';
+          await answerCallback(callbackId, `⚠️ Esta recarga ya fue ${was} previamente.`);
+        } else if (msg === 'INVALID_RECHARGE') {
+          await answerCallback(callbackId, '⚠️ La recarga tiene datos inválidos. No se acreditó nada.');
+        } else {
+          console.error('Error procesando recarga:', err);
+          await answerCallback(callbackId, '⚠️ Error al guardar. No se acreditó nada; intenta de nuevo.');
         }
+        return NextResponse.json({ ok: true });
+      }
 
-        // 3. Responder al click en Telegram
-        await answerCallback(callbackId, `✅ ¡Recarga de ${amount} BOB aprobada con éxito!`);
+      const timeStr = new Date().toLocaleTimeString('es-BO', {
+        timeZone: 'America/La_Paz',
+        hour: '2-digit',
+        minute: '2-digit',
+      });
 
-        // 4. Actualizar el mensaje en Telegram para quitar los botones y mostrar el sello de aprobación
-        if (chatId && messageId) {
-          const originalCaption = message.caption || '';
-          const newCaption = `${originalCaption}\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n✅ *RECARGA APROBADA (+${amount} BOB)*\n👤 Aprobado por el Administrador a las ${timeStr} hrs.\n💰 Saldo acreditado al conductor inmediatamente.`;
+      await answerCallback(
+        callbackId,
+        approving ? `✅ ¡Recarga de ${amount} BOB aprobada con éxito!` : '❌ Recarga rechazada.'
+      );
 
-          await fetch(`https://api.telegram.org/bot${TELEGRAM_TOKEN}/editMessageCaption`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              chat_id: chatId,
-              message_id: messageId,
-              caption: newCaption,
-              parse_mode: 'Markdown',
-              reply_markup: { inline_keyboard: [] }, // Eliminar los botones
-            }),
-          });
-        }
-      } else if (action === 'reject') {
-        // 1. Marcar recarga como rechazada en Firestore
-        try {
-          await updateDoc(rechargeRef, {
-            status: 'REJECTED',
-            rejectedAtMs: Date.now(),
-            rejectedAt: serverTimestamp(),
-          });
-        } catch (fsErr) {
-          console.warn('No se pudo actualizar estado rejected en Firestore:', fsErr);
-        }
-
-        // 2. Responder al click en Telegram
-        await answerCallback(callbackId, '❌ Recarga rechazada.');
-
-        // 3. Actualizar el mensaje en Telegram para quitar los botones y mostrar sello de rechazo
-        if (chatId && messageId) {
-          const originalCaption = message.caption || '';
-          const newCaption = `${originalCaption}\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n❌ *RECARGA RECHAZADA*\n👤 Rechazado por el Administrador a las ${timeStr} hrs.\n⚠️ Motivo: Comprobante no coincide o no figura en la cuenta receptora.`;
-
-          await fetch(`https://api.telegram.org/bot${TELEGRAM_TOKEN}/editMessageCaption`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              chat_id: chatId,
-              message_id: messageId,
-              caption: newCaption,
-              parse_mode: 'Markdown',
-              reply_markup: { inline_keyboard: [] },
-            }),
-          });
-        }
+      if (chatId && messageId) {
+        const stamp = approving
+          ? `✅ RECARGA APROBADA (+${amount} BOB)\n👤 Aprobada a las ${timeStr} hrs.\n💰 Saldo acreditado al conductor.`
+          : `❌ RECARGA RECHAZADA\n👤 Rechazada a las ${timeStr} hrs.`;
+        const original = message.caption ?? message.text ?? '';
+        const editMethod = message.caption !== undefined ? 'editMessageCaption' : 'editMessageText';
+        await fetch(telegramApi(editMethod), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            chat_id: chatId,
+            message_id: messageId,
+            ...(editMethod === 'editMessageCaption'
+              ? { caption: `${original}\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n${stamp}` }
+              : { text: `${original}\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n${stamp}` }),
+            reply_markup: { inline_keyboard: [] },
+          }),
+        }).catch((e) => console.warn('No se pudo editar el mensaje de Telegram:', e));
       }
 
       return NextResponse.json({ ok: true });
@@ -179,22 +167,18 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ ok: true });
   } catch (err: any) {
+    // Responder 200 evita que Telegram reintente en bucle una petición defectuosa.
     console.error('Error handling Telegram webhook:', err);
-    // Siempre responder 200 a Telegram para que no repita peticiones fallidas en bucle
-    return NextResponse.json({ ok: true, handledError: err?.message });
+    return NextResponse.json({ ok: true });
   }
 }
 
 async function answerCallback(callbackQueryId: string, text: string) {
   try {
-    await fetch(`https://api.telegram.org/bot${TELEGRAM_TOKEN}/answerCallbackQuery`, {
+    await fetch(telegramApi('answerCallbackQuery'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        callback_query_id: callbackQueryId,
-        text,
-        show_alert: true,
-      }),
+      body: JSON.stringify({ callback_query_id: callbackQueryId, text, show_alert: true }),
     });
   } catch (e) {
     console.warn('Error answering Telegram callback query:', e);

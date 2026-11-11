@@ -10,7 +10,6 @@ export const useWalletNotificationListener = () => {
   const {
     user,
     loginUser,
-    topUpWallet,
     pendingRecharge,
     setPendingRecharge,
     addWalletNotification,
@@ -30,15 +29,18 @@ export const useWalletNotificationListener = () => {
     // Avoid double handling of the same recharge
     if (handledRechargeIdRef.current === rechargeId) return;
 
-    const unsubscribe = apiService.subscribeToRecharge(rechargeId, (recharge) => {
+    const unsubscribe = apiService.subscribeToRecharge(rechargeId, async (recharge) => {
       if (!recharge || !recharge.status) return;
 
       if (recharge.status === 'APPROVED' && handledRechargeIdRef.current !== rechargeId) {
         handledRechargeIdRef.current = rechargeId;
 
         const amount = Number(recharge.amount) || pendingRecharge.amount || 0;
+        // El servidor ya acreditó el saldo al aprobar: se lee de Firestore (fuente única),
+        // así nunca se suma dos veces aunque también lo actualice el modal de recarga.
+        const serverBalance = user ? await apiService.fetchWalletBalance(user.id) : null;
         const currentBal = typeof user?.walletBalance === 'number' ? user.walletBalance : 0;
-        const newBalance = currentBal + amount;
+        const newBalance = serverBalance ?? currentBal;
         const timeStr = new Date().toLocaleTimeString('es-BO', {
           timeZone: 'America/La_Paz',
           hour: '2-digit',
@@ -56,8 +58,6 @@ export const useWalletNotificationListener = () => {
             ...user,
             walletBalance: newBalance,
           });
-        } else {
-          topUpWallet(amount);
         }
 
         // 2. Set dynamic island banner
@@ -140,7 +140,7 @@ export const useWalletNotificationListener = () => {
     });
 
     return () => unsubscribe();
-  }, [pendingRecharge, user, loginUser, topUpWallet, setPendingRecharge, addWalletNotification]);
+  }, [pendingRecharge, user, loginUser, setPendingRecharge, addWalletNotification]);
 
   return {
     activeBanner,

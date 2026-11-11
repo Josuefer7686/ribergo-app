@@ -5,7 +5,7 @@ import {
 import { DriverData, VehicleType } from './mockData';
 import { db, auth, isFirebaseConfigured } from '@/lib/firebase';
 import { 
-  collection, doc, setDoc, getDoc, getDocs, addDoc, updateDoc, onSnapshot, query, where, orderBy, serverTimestamp 
+  collection, doc, setDoc, getDoc, getDocs, addDoc, updateDoc, onSnapshot, query, where, orderBy, serverTimestamp, runTransaction 
 } from 'firebase/firestore';
 import { 
   createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, GoogleAuthProvider, signInWithPopup, UserCredential,
@@ -1865,34 +1865,22 @@ export const apiService = {
   },
 
   /**
-   * Top-up driver wallet balance in Cloud Firestore and record transaction in 'wallet_recharges'
+   * Lee el saldo real de la billetera desde Cloud Firestore.
+   * El saldo SOLO lo acredita el servidor al aprobar una recarga (webhook de
+   * Telegram); el cliente nunca escribe un saldo de recarga. Devuelve null si
+   * no se pudo leer.
    */
-  async topUpDriverWallet(driverId: string, amount: number, currentBalance: number = 0, transferReference?: string): Promise<number> {
-    const newBalance = (currentBalance || 0) + amount;
-    if (isFirebaseConfigured() && driverId) {
-      try {
-        const rechargeId = 'rec-' + Date.now();
-        await setDoc(doc(db, 'wallet_recharges', rechargeId), {
-          id: rechargeId,
-          driverId,
-          amount,
-          previousBalance: currentBalance || 0,
-          newBalance,
-          paymentMethod: 'QR_BOLIVIA',
-          reference: transferReference || `QR-PAGO-${driverId}-${Date.now().toString().slice(-6)}`,
-          status: 'COMPLETED',
-          timestamp: serverTimestamp(),
-        });
-
-        await setDoc(doc(db, 'users', driverId), {
-          walletBalance: newBalance,
-          updatedAt: serverTimestamp(),
-        }, { merge: true });
-      } catch (err) {
-        console.error('Firestore topUpDriverWallet Error:', err);
-      }
+  async fetchWalletBalance(driverId: string): Promise<number | null> {
+    if (!isFirebaseConfigured() || !driverId) return null;
+    try {
+      const snap = await getDoc(doc(db, 'users', driverId));
+      if (!snap.exists()) return null;
+      const value = Number(snap.data()?.walletBalance);
+      return Number.isFinite(value) ? value : null;
+    } catch (err) {
+      console.error('Firestore fetchWalletBalance Error:', err);
+      return null;
     }
-    return newBalance;
   },
 
   /**
@@ -1905,7 +1893,7 @@ export const apiService = {
     driverPhone: string;
     vehicle: string;
     amount: number;
-    currentBalance: number;
+    currentBalance?: number;
   }): Promise<{ ok: boolean; rechargeId?: string; error?: string }> {
     try {
       const formData = new FormData();
@@ -1915,7 +1903,6 @@ export const apiService = {
       formData.append('driverPhone', payload.driverPhone);
       formData.append('vehicle', payload.vehicle);
       formData.append('amount', String(payload.amount));
-      formData.append('currentBalance', String(payload.currentBalance));
 
       const res = await fetch('/api/wallet/request-topup', {
         method: 'POST',
@@ -1989,13 +1976,19 @@ export const apiService = {
    * Deduct 1 BOB trip commission from driver balance in Cloud Firestore
    */
   async deductTripCommission(driverId: string, currentBalance: number = 0, commissionFee: number = 1.0): Promise<number> {
-    const newBalance = Math.max(0, (currentBalance || 0) - commissionFee);
+    let newBalance = Math.max(0, (currentBalance || 0) - commissionFee);
     if (isFirebaseConfigured() && driverId) {
       try {
-        await setDoc(doc(db, 'users', driverId), {
-          walletBalance: newBalance,
-          updatedAt: serverTimestamp(),
-        }, { merge: true });
+        // Transacción: parte del saldo REAL del servidor, así una recarga aprobada
+        // mientras termina el viaje no se pierde por usar un valor local viejo.
+        const ref = doc(db, 'users', driverId);
+        newBalance = await runTransaction(db, async (tx) => {
+          const snap = await tx.get(ref);
+          const serverBalance = snap.exists() ? Number(snap.data()?.walletBalance) || 0 : 0;
+          const next = Math.max(0, serverBalance - commissionFee);
+          tx.set(ref, { walletBalance: next, updatedAt: serverTimestamp() }, { merge: true });
+          return next;
+        });
       } catch (err) {
         console.error('Firestore deductTripCommission Error:', err);
       }
@@ -2007,13 +2000,17 @@ export const apiService = {
    * Decrement gift free trips remaining for a driver in Cloud Firestore
    */
   async decrementDriverFreeTrips(driverId: string, currentFreeTrips: number = 0): Promise<number> {
-    const newRemaining = Math.max(0, (currentFreeTrips || 0) - 1);
+    let newRemaining = Math.max(0, (currentFreeTrips || 0) - 1);
     if (isFirebaseConfigured() && driverId) {
       try {
-        await setDoc(doc(db, 'users', driverId), {
-          freeTripsRemaining: newRemaining,
-          updatedAt: serverTimestamp(),
-        }, { merge: true });
+        const ref = doc(db, 'users', driverId);
+        newRemaining = await runTransaction(db, async (tx) => {
+          const snap = await tx.get(ref);
+          const serverRemaining = snap.exists() ? Number(snap.data()?.freeTripsRemaining) || 0 : 0;
+          const next = Math.max(0, serverRemaining - 1);
+          tx.set(ref, { freeTripsRemaining: next, updatedAt: serverTimestamp() }, { merge: true });
+          return next;
+        });
       } catch (err) {
         console.error('Firestore decrementDriverFreeTrips Error:', err);
       }

@@ -1,26 +1,61 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/firebase';
 import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
+import {
+  TELEGRAM_TOKEN,
+  TELEGRAM_ADMIN_CHAT_ID,
+  ALLOWED_TOPUP_AMOUNTS,
+  escapeMarkdown,
+  telegramApi,
+} from '@/lib/telegram';
 
-const TELEGRAM_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '9299311110:AAGICHR74xGvZThQP-U2Mbf2Fr0VTB2WN2U';
+const MAX_RECEIPT_BYTES = 8 * 1024 * 1024; // 8 MB
 
 export async function POST(req: NextRequest) {
   try {
+    if (!TELEGRAM_TOKEN || !TELEGRAM_ADMIN_CHAT_ID) {
+      console.error('request-topup sin configurar: falta TELEGRAM_BOT_TOKEN o TELEGRAM_ADMIN_CHAT_ID');
+      return NextResponse.json(
+        { ok: false, error: 'El servicio de recargas no está disponible por ahora.' },
+        { status: 503 }
+      );
+    }
+
     const formData = await req.formData();
     const file = formData.get('receipt') as File | Blob | null;
-    const driverId = (formData.get('driverId') as string) || '';
-    const driverName = (formData.get('driverName') as string) || 'Conductor';
-    const driverPhone = (formData.get('driverPhone') as string) || '';
-    const vehicle = (formData.get('vehicle') as string) || 'Mototaxi';
-    const amount = Number(formData.get('amount')) || 10;
-    const currentBalance = Number(formData.get('currentBalance')) || 0;
+    const driverId = String(formData.get('driverId') || '').trim();
+    const driverName = String(formData.get('driverName') || 'Conductor').slice(0, 80);
+    const driverPhone = String(formData.get('driverPhone') || '').slice(0, 30);
+    const vehicle = String(formData.get('vehicle') || 'Mototaxi').slice(0, 120);
+    const amount = Number(formData.get('amount'));
 
     if (!driverId) {
       return NextResponse.json({ ok: false, error: 'Driver ID es requerido' }, { status: 400 });
     }
+    if (!(ALLOWED_TOPUP_AMOUNTS as readonly number[]).includes(amount)) {
+      return NextResponse.json({ ok: false, error: 'Monto de recarga no válido' }, { status: 400 });
+    }
+    if (!file || file.size === 0) {
+      return NextResponse.json({ ok: false, error: 'Adjunta la foto del comprobante' }, { status: 400 });
+    }
+    if (file.size > MAX_RECEIPT_BYTES) {
+      return NextResponse.json({ ok: false, error: 'La foto es demasiado grande (máx. 8 MB)' }, { status: 413 });
+    }
+    if (file.type && !file.type.startsWith('image/')) {
+      return NextResponse.json({ ok: false, error: 'El comprobante debe ser una imagen' }, { status: 400 });
+    }
 
-    const rechargeId = 'rec-' + Date.now();
+    // El saldo actual lo lee el servidor; nunca se confía en el que envía el cliente.
+    let currentBalance = 0;
+    try {
+      const userSnap = await getDoc(doc(db, 'users', driverId));
+      if (userSnap.exists()) currentBalance = Number(userSnap.data()?.walletBalance) || 0;
+    } catch (e) {
+      console.warn('No se pudo leer el saldo del conductor:', e);
+    }
+
     const nowMs = Date.now();
+    const rechargeId = `rec-${nowMs}-${Math.random().toString(36).slice(2, 6)}`;
     const dateStr = new Date(nowMs).toLocaleString('es-BO', {
       timeZone: 'America/La_Paz',
       day: '2-digit',
@@ -31,10 +66,9 @@ export async function POST(req: NextRequest) {
       second: '2-digit',
     });
 
-    // 1. Guardar la solicitud en Firestore en estado PENDING (con resiliencia a permisos)
+    // 1. La solicitud DEBE quedar guardada: sin ella el admin no podría aprobarla.
     try {
-      const rechargeDocRef = doc(db, 'wallet_recharges', rechargeId);
-      await setDoc(rechargeDocRef, {
+      await setDoc(doc(db, 'wallet_recharges', rechargeId), {
         id: rechargeId,
         driverId,
         driverName,
@@ -48,29 +82,20 @@ export async function POST(req: NextRequest) {
         formattedDate: dateStr,
       });
     } catch (fsErr) {
-      console.warn('Advertencia guardando en Firestore wallet_recharges:', fsErr);
+      console.error('No se pudo guardar wallet_recharges:', fsErr);
+      return NextResponse.json(
+        { ok: false, error: 'No pudimos registrar tu solicitud. Intenta de nuevo.' },
+        { status: 502 }
+      );
     }
 
-    // 2. Obtener el Chat ID del administrador (con fallback al ID verificado 6344399294)
-    let adminChatId = process.env.TELEGRAM_ADMIN_CHAT_ID || '6344399294';
-    try {
-      const configSnap = await getDoc(doc(db, 'system_config', 'telegram_admin'));
-      if (configSnap.exists() && configSnap.data()?.chatId) {
-        adminChatId = String(configSnap.data()?.chatId);
-      }
-    } catch (e) {
-      // Usar fallback 6344399294
-    }
-
-    // 3. Despachar solicitud con foto al Telegram del administrador
-    if (adminChatId) {
-      const caption = 
+    // 2. Enviar el comprobante al administrador
+    const caption =
 `🔔 *NUEVA SOLICITUD DE RECARGA DE SALDO*
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-👤 *Conductor:* ${driverName}
-🆔 *ID Conductor:* \`${driverId}\`
-📱 *Teléfono:* \`${driverPhone}\`
-🏍️ *Vehículo:* ${vehicle}
+👤 *Conductor:* ${escapeMarkdown(driverName)}
+📱 *Teléfono:* \`${driverPhone.replace(/`/g, '')}\`
+🏍️ *Vehículo:* ${escapeMarkdown(vehicle)}
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 💰 *Monto Solicitado:* *${amount.toFixed(2)} BOB*
 💳 *Saldo:* ${currentBalance.toFixed(2)} BOB  ➔  *${(currentBalance + amount).toFixed(2)} BOB*
@@ -79,60 +104,50 @@ export async function POST(req: NextRequest) {
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ⚠️ *Comprueba que la hora del comprobante coincida con esta solicitud y que el dinero figure en tu Yasta / Al Toque.*`;
 
-      const replyMarkup = {
-        inline_keyboard: [
-          [
-            { text: `✅ Aprobar Recarga (+${amount} BOB)`, callback_data: `approve:${rechargeId}` },
-            { text: `❌ Rechazar`, callback_data: `reject:${rechargeId}` },
-          ],
+    const replyMarkup = {
+      inline_keyboard: [
+        [
+          { text: `✅ Aprobar Recarga (+${amount} BOB)`, callback_data: `approve:${rechargeId}` },
+          { text: `❌ Rechazar`, callback_data: `reject:${rechargeId}` },
         ],
-      };
+      ],
+    };
 
-      try {
-        if (file && file.size > 0) {
-          // Envío con fotografía adjunta
-          const tgFormData = new FormData();
-          tgFormData.append('chat_id', adminChatId);
-          tgFormData.append('caption', caption);
-          tgFormData.append('parse_mode', 'Markdown');
-          tgFormData.append('photo', file);
-          tgFormData.append('reply_markup', JSON.stringify(replyMarkup));
+    const tgFormData = new FormData();
+    tgFormData.append('chat_id', TELEGRAM_ADMIN_CHAT_ID);
+    tgFormData.append('caption', caption);
+    tgFormData.append('parse_mode', 'Markdown');
+    tgFormData.append('photo', file);
+    tgFormData.append('reply_markup', JSON.stringify(replyMarkup));
 
-          const resTg = await fetch(`https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendPhoto`, {
-            method: 'POST',
-            body: tgFormData,
-          });
-          const tgResult = await resTg.json();
-          if (!tgResult.ok) {
-            console.error('Telegram sendPhoto error:', tgResult);
-          }
-        } else {
-          // Envío en texto si no hay archivo
-          await fetch(`https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              chat_id: adminChatId,
-              text: caption,
-              parse_mode: 'Markdown',
-              reply_markup: replyMarkup,
-            }),
-          });
-        }
-      } catch (tgErr) {
-        console.error('Error sending message to Telegram bot:', tgErr);
-      }
-    } else {
-      console.warn('No hay TELEGRAM_ADMIN_CHAT_ID registrado aún. El admin debe enviar /start al bot.');
+    let delivered = false;
+    try {
+      const resTg = await fetch(telegramApi('sendPhoto'), { method: 'POST', body: tgFormData });
+      const tgResult = await resTg.json();
+      delivered = Boolean(tgResult.ok);
+      if (!delivered) console.error('Telegram sendPhoto error:', tgResult);
+    } catch (tgErr) {
+      console.error('Error sending message to Telegram bot:', tgErr);
     }
 
-    return NextResponse.json({
-      ok: true,
-      rechargeId,
-      status: 'PENDING',
-    });
+    if (!delivered) {
+      // El admin nunca lo verá: se marca como fallida para que el conductor pueda reintentar.
+      try {
+        await setDoc(
+          doc(db, 'wallet_recharges', rechargeId),
+          { status: 'FAILED', failedAtMs: Date.now() },
+          { merge: true }
+        );
+      } catch {}
+      return NextResponse.json(
+        { ok: false, error: 'No pudimos enviar tu comprobante a administración. Intenta de nuevo.' },
+        { status: 502 }
+      );
+    }
+
+    return NextResponse.json({ ok: true, rechargeId, status: 'PENDING' });
   } catch (err: any) {
     console.error('Error in request-topup route:', err);
-    return NextResponse.json({ ok: false, error: err?.message || 'Error interno' }, { status: 500 });
+    return NextResponse.json({ ok: false, error: 'Error interno' }, { status: 500 });
   }
 }

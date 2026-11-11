@@ -6,7 +6,7 @@ import {
   DollarSign, TrendingUp, Clock, Bike, Calendar, QrCode, 
   HelpCircle, AlertCircle, Star, MessageSquare, MapPin, Award
 } from 'lucide-react';
-import { motion } from 'framer-motion';
+import { motion } from 'motion/react';
 import { RiberGoCard } from '@/components/shared/RiberGoCard';
 import { QrTopupModal } from '@/components/modals/QrTopupModal';
 import { DriverWalletTutorialModal } from '@/components/modals/DriverWalletTutorialModal';
@@ -89,12 +89,8 @@ export const IncomeView = () => {
 
   const maxDayAmount = Math.max(...dailyChart.map(d => d.amount), 50);
 
-  const handleTopupSuccess = async (amount: number) => {
-    topUpWallet(amount);
-    if (user?.id) {
-      await apiService.topUpDriverWallet(user.id, amount, currentBalance);
-    }
-  };
+  // El saldo ya fue acreditado por el servidor al aprobar la recarga (QrTopupModal lo lee de Firestore).
+  const handleTopupSuccess = () => {};
 
   const handleCloseTutorial = async () => {
     setIsTutorialModalOpen(false);
